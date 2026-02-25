@@ -1,51 +1,78 @@
-# Lead Generation System
+# Lead Generation Pipeline
 
-3-layer architecture for reliable, maintainable lead generation workflows.
+AI-orchestrated B2B lead generation system using a 3-layer architecture for reliable, maintainable workflows.
+
+Scrape leads from Apollo and Google Maps, enrich with AI, filter for quality, and export to Google Sheets — all orchestrated by an AI agent following structured SOPs.
 
 ## Architecture
 
-**Layer 1: Directives** (`directives/`) - SOPs in Markdown defining goals, inputs, tools, outputs, and edge cases.
-**Layer 2: Orchestration** (AI agent) - Reads directives, calls execution tools in order, handles errors, updates directives.
-**Layer 3: Execution** (`execution/`) - Deterministic Python scripts for API calls, data processing, file operations.
-
-## Directory Structure
-
 ```
-lead_gen/
-├── CLAUDE.md, AGENTS.md, GEMINI.md    # AI agent instructions
-├── .env                                # API keys (gitignored)
-├── credentials.json, token.json        # Google OAuth (gitignored)
-├── requirements.txt
-├── docs/                               # Reference documentation
-│   ├── IMPLEMENTATION_PLAN.md
-│   ├── QUICK_START_OPTIMIZED.md
-│   ├── SETUP.md
-│   └── WORKFLOW_FIXES_DEC5.md
-├── directives/                         # SOPs (see directives/README.md)
-│   └── _archived/
-├── execution/                          # Python scripts
-│   └── _archived/
-├── campaigns/                          # Client data (permanent)
-│   ├── _template/
-│   └── {client_id}/
-│       ├── client.json
-│       ├── apollo_lists/{campaign}/
-│       └── google_maps_lists/{campaign}/
-└── .tmp/                               # Intermediates (gitignored)
-    ├── b2b_finder/                     # Olympus scraper output
-    ├── codecrafter/                    # CodeCrafter scraper output
-    ├── peakydev/                       # PeakyDev scraper output
-    ├── merged/                         # Deduplication output
-    ├── ai_enriched/                    # AI enrichment output
-    ├── samples/                        # Sales sample output
-    └── imports/                        # External CSV imports
+┌─────────────────────────────────────────────────────┐
+│  Layer 1: Directives (directives/)                  │
+│  SOPs in Markdown — goals, inputs, tools, outputs   │
+├─────────────────────────────────────────────────────┤
+│  Layer 2: Orchestration (AI Agent)                  │
+│  Reads directives, calls tools, handles errors      │
+├─────────────────────────────────────────────────────┤
+│  Layer 3: Execution (execution/)                    │
+│  Deterministic Python scripts — APIs, data, files   │
+└─────────────────────────────────────────────────────┘
 ```
 
-## Getting Started
+**Why this works:** LLMs are probabilistic, but most business logic is deterministic. By pushing complexity into tested Python scripts, the AI agent only handles decision-making. 90% accuracy per step = 59% over 5 steps if the AI does everything; with deterministic execution, each step is ~100%.
 
-1. Install dependencies: `pip install -r requirements.txt`
-2. Configure API keys in `.env` (see `docs/SETUP.md`)
-3. Set up Google OAuth: `credentials.json` + `token.json`
+## Prerequisites
+
+You'll need accounts and API keys for:
+
+| Service | Purpose | Get it from |
+|---------|---------|-------------|
+| [Apify](https://apify.com) | Apollo scrapers (Olympus, PeakyDev) | Console > Integrations |
+| [RapidAPI](https://rapidapi.com) | Apollo scraper (CodeCrafter) | Dashboard > Security |
+| [Apollo.io](https://apollo.io) | Lead database (cookies for Olympus) | Browser DevTools |
+| [Google Cloud](https://console.cloud.google.com) | Sheets API for exports | OAuth credentials |
+| [Anthropic](https://console.anthropic.com) | Primary AI (enrichment, classification) | API Keys |
+| [OpenAI](https://platform.openai.com) | Fallback AI (industry filtering) | API Keys |
+| [LeadMagic](https://leadmagic.io) | Email verification (optional) | API Keys |
+
+## Setup
+
+```bash
+# 1. Clone
+git clone https://github.com/kmicpaps/lead_gen.git
+cd lead_gen
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Configure API keys
+cp .env.example .env
+# Edit .env and fill in your actual API keys
+
+# 4. Set up Google OAuth (for Sheets export)
+# Place credentials.json in the root directory
+# Run any script that uses Sheets — it will prompt for OAuth on first run
+```
+
+## Slash Commands
+
+This workspace includes 11 Claude Code slash commands for common tasks:
+
+| Command | What it does |
+|---------|-------------|
+| `/new-apollo-list` | Full Apollo scraping campaign (scrape → merge → dedup → filter → export) |
+| `/find-more-leads` | Rescrape an existing Apollo list for new leads |
+| `/gmaps-leads` | Google Maps local business scraping |
+| `/build-apollo-url` | Convert natural language to Apollo search URL |
+| `/quality-filter` | Analyze and filter a lead list for quality |
+| `/deduplicate-leads` | Remove duplicates across campaigns |
+| `/research-client` | AI website analysis for client onboarding |
+| `/cold-email-planning` | Plan cold email sequences |
+| `/create-sales-sample` | Generate demo deliverables for prospects |
+| `/onboard-new-client` | Set up a new client folder structure |
+| `/pipeline-overview` | See all available capabilities |
+
+See [PROMPTS.md](PROMPTS.md) for copy-paste prompt templates and detailed usage.
 
 ## Core Workflows
 
@@ -56,11 +83,50 @@ lead_gen/
 | Google Maps scraping | `gmaps_lead_generation.md` | `gmaps_niche_scraper.py`, `gmaps_lead_pipeline.py` |
 | Cross-campaign dedup | `cross_campaign_deduplication.md` | `cross_campaign_deduplicator.py` |
 | Industry enrichment | `enrich_industry.md` | `ai_industry_enricher.py` |
+| Cold email copywriting | `cold_email_copywriting.md` | `cold_email_exporter.py` |
 | Google Sheets export | (part of all workflows) | `google_sheets_exporter.py` |
+
+## Directory Structure
+
+```
+lead_gen/
+├── CLAUDE.md, AGENTS.md, GEMINI.md    # AI agent instructions (identical)
+├── PROMPTS.md                          # Prompt library & slash command docs
+├── .env                                # API keys (gitignored)
+├── .env.example                        # API key template
+├── credentials.json, token.json        # Google OAuth (gitignored)
+├── requirements.txt
+├── docs/                               # Reference documentation
+├── directives/                         # SOPs (see directives/README.md)
+│   └── _archived/                      # Superseded versions
+├── execution/                          # Python scripts (55+)
+│   └── _archived/                      # Old script versions
+├── campaigns/                          # Client data (gitignored except template)
+│   ├── _template/                      # New client template
+│   └── {client_id}/
+│       ├── client.json
+│       ├── apollo_lists/{campaign}/
+│       └── google_maps_lists/{campaign}/
+├── .claude/skills/                     # Claude Code slash commands (11)
+└── .tmp/                               # Intermediates (gitignored)
+```
 
 ## Key Principles
 
-- Deliverables live in cloud (Google Sheets) -- local files are temporary
-- Everything in `.tmp/` can be deleted and regenerated
-- Self-annealing: when things break, fix the tool, update the directive, system gets stronger
-- Push complexity into deterministic scripts; AI handles decision-making only
+- **Deliverables live in cloud** — Google Sheets are the output; local files are temporary
+- **Everything in `.tmp/` can be deleted** and regenerated from source data
+- **Self-annealing** — when things break, fix the tool, update the directive, system gets stronger
+- **Deterministic execution** — push complexity into Python scripts; AI handles decision-making only
+- **Registry-driven** — adding a new scraper = 3 steps (script + registry entry + normalizer)
+
+## Adding a New Scraper
+
+1. Create `execution/scraper_newname.py` following existing scraper patterns
+2. Add a registry entry in `execution/scraper_registry.py`
+3. Add a `normalize_newname()` function in `execution/lead_normalizer.py`
+
+No orchestrator changes needed — the pipeline picks up new scrapers automatically.
+
+## License
+
+Private repository. All rights reserved.
