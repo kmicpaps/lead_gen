@@ -1,0 +1,46 @@
+{
+  "client_id": "",
+  "company_name": "",
+  "website": "",
+  "onboarded_at": "",
+
+  "business": {
+    "what_they_do": "",
+    "problem_solved": "",
+    "value_prop_short": "",
+    "proof_points": []
+  },
+
+  "icp": {
+    "job_titles": [],
+    "seniorities": ["C-Suite", "VP", "Director", "Manager"],
+    "company_size": [],
+    "industries": [],
+    "industries_exclude": [],
+    "locations": [],
+    "keywords": [],
+    "red_flags": []
+  },
+
+  "apollo_filters": {
+    "person_titles": [],
+    "person_seniorities": [],
+    "organization_num_employees_ranges": [],
+    "organization_industries": [],
+    "organization_locations": [],
+    "organization_keyword_tags": []
+  },
+
+  "email_settings": {
+    "sender_name": "",
+    "sender_title": "",
+    "sender_linkedin": "",
+    "tone": "casual",
+    "avoid_phrases": [],
+    "sign_off": ""
+  },
+
+  "reference_customers": [],
+
+  "notes": ""
+}

@@ -1,0 +1,219 @@
+{
+  "client_id": "_template",
+  "description": "Example reference copies showing different styles and sequence positions. Copy and customize for your clients.",
+  "updated_at": "2026-02-03T00:00:00Z",
+  "copies": [
+    {
+      "id": "initial_curiosity_1",
+      "type": "full_email",
+      "position": "initial",
+      "subject": "Quick question about {{company}}",
+      "body": "Hi {{first_name}},\n\n{{icebreaker}}\n\nI work with marketing teams who are tired of watching their ad spend disappear into campaigns that don't convert.\n\nWe've helped companies like yours cut wasted spend by 30-40% while actually increasing qualified leads.\n\nWould it make sense to chat for 15 minutes this week?\n\nBest,\n{{sender_name}}",
+      "style": "curiosity",
+      "tone": "casual",
+      "notes": "Opens with personalization, soft problem agitation, specific result, low-commitment CTA"
+    },
+    {
+      "id": "initial_direct_1",
+      "type": "full_email",
+      "position": "initial",
+      "subject": "{{first_name}} - idea for {{company}}",
+      "body": "{{first_name}},\n\n{{icebreaker}}\n\nI noticed {{company}} is investing in paid advertising. Quick question: are you happy with your cost per lead?\n\nWe specialize in Google Ads optimization for companies in your space. Our average client sees a 35% reduction in CPL within 60 days.\n\nWorth a 15-minute call to see if we could do the same for you?\n\n{{sender_name}}",
+      "style": "direct",
+      "tone": "professional",
+      "notes": "More direct approach, specific metric, clear value prop"
+    },
+    {
+      "id": "initial_value_first_1",
+      "type": "full_email",
+      "position": "initial",
+      "subject": "Thought this might help {{company}}",
+      "body": "Hi {{first_name}},\n\n{{icebreaker}}\n\nI put together a quick breakdown of 3 things I noticed about {{company}}'s current ad presence that might be costing you conversions.\n\nNo pitch - just wanted to share in case it's useful.\n\nWant me to send it over?\n\n{{sender_name}}",
+      "style": "value_first",
+      "tone": "helpful",
+      "notes": "Leads with value, no ask upfront, builds curiosity"
+    },
+    {
+      "id": "initial_pattern_interrupt_1",
+      "type": "full_email",
+      "position": "initial",
+      "subject": "Not another sales email",
+      "body": "{{first_name}},\n\nI know your inbox is full of people trying to sell you things. So I'll keep this short.\n\n{{icebreaker}}\n\nIf you're looking to improve your paid ad performance without increasing budget, I have some ideas that might help.\n\nIf not, no worries - feel free to ignore this.\n\nBut if you're curious, just reply \"tell me more\" and I'll send over some specifics.\n\n{{sender_name}}",
+      "style": "pattern_interrupt",
+      "tone": "casual",
+      "notes": "Acknowledges email fatigue, very low pressure, easy response"
+    },
+    {
+      "id": "followup_1_value",
+      "type": "full_email",
+      "position": "followup_1",
+      "delay_days": 3,
+      "subject": "Re: Quick question about {{company}}",
+      "body": "Hi {{first_name}},\n\nJust circling back on my last email.\n\nI wanted to share a quick win we had with a similar company in {{industry}}:\n\nThey were spending $15K/month on Google Ads but only getting 40 qualified leads. We restructured their campaigns and within 8 weeks they were getting 85+ leads at the same spend.\n\nWould love to explore if we could get similar results for {{company}}.\n\n15 minutes this week?\n\n{{sender_name}}",
+      "style": "case_study",
+      "tone": "professional",
+      "notes": "Adds specific case study with numbers, re-states CTA"
+    },
+    {
+      "id": "followup_1_short",
+      "type": "full_email",
+      "position": "followup_1",
+      "delay_days": 3,
+      "subject": "Re: {{first_name}} - idea for {{company}}",
+      "body": "{{first_name}},\n\nJust bumping this up in case it got buried.\n\nHappy to share how we've helped similar companies cut their cost per lead by 30-40%.\n\nWorth a quick chat?\n\n{{sender_name}}",
+      "style": "short_bump",
+      "tone": "casual",
+      "notes": "Very short, acknowledges busy inbox, restates value"
+    },
+    {
+      "id": "followup_2_social_proof",
+      "type": "full_email",
+      "position": "followup_2",
+      "delay_days": 4,
+      "subject": "Re: Quick question about {{company}}",
+      "body": "Hi {{first_name}},\n\nOne more thought before I stop bothering you.\n\nWe just finished a campaign for [Client Name] in {{industry}} where we:\n- Reduced their cost per acquisition by 42%\n- Increased conversion rate from 2.1% to 4.8%\n- All within 90 days\n\nI genuinely think we could get {{company}} similar results based on what I've seen.\n\nIf you're even slightly curious, let's do a quick 15-minute call. If it's not a fit, I'll be the first to tell you.\n\n{{sender_name}}",
+      "style": "social_proof",
+      "tone": "professional",
+      "notes": "Specific metrics from real client, addresses objection, confidence"
+    },
+    {
+      "id": "followup_2_question",
+      "type": "full_email",
+      "position": "followup_2",
+      "delay_days": 4,
+      "subject": "Quick question",
+      "body": "{{first_name}},\n\nI've reached out a couple times - just want to make sure I'm not missing something.\n\nIs improving your paid ad performance not a priority right now?\n\nOr maybe you've got it handled internally?\n\nEither way, just let me know and I'll update my notes.\n\n{{sender_name}}",
+      "style": "question",
+      "tone": "casual",
+      "notes": "Asks for clarity, gives easy outs, often gets responses"
+    },
+    {
+      "id": "followup_3_resource",
+      "type": "full_email",
+      "position": "followup_3",
+      "delay_days": 5,
+      "subject": "Free resource for {{company}}",
+      "body": "Hi {{first_name}},\n\nI know I've been persistent, so I wanted to at least leave you with something valuable.\n\nHere's a quick checklist we use internally to audit Google Ads accounts: [link]\n\nNo strings attached - use it however you want.\n\nIf you ever want to chat about your campaigns, you know where to find me.\n\n{{sender_name}}",
+      "style": "value_give",
+      "tone": "helpful",
+      "notes": "Gives genuine value, soft close, leaves door open"
+    },
+    {
+      "id": "breakup_classic",
+      "type": "full_email",
+      "position": "breakup",
+      "delay_days": 7,
+      "subject": "Should I close your file?",
+      "body": "Hi {{first_name}},\n\nI've reached out a few times and haven't heard back.\n\nI totally get it - you're busy and this might not be the right time.\n\nI'm going to assume improving ad performance isn't a priority for {{company}} right now and close out your file.\n\nIf anything changes down the road, feel free to reach out. I'll be here.\n\nAll the best,\n{{sender_name}}",
+      "style": "classic_breakup",
+      "tone": "professional",
+      "notes": "Classic breakup, often gets 'wait, don't close' responses"
+    },
+    {
+      "id": "breakup_humor",
+      "type": "full_email",
+      "position": "breakup",
+      "delay_days": 7,
+      "subject": "Breaking up is hard to do",
+      "body": "{{first_name}},\n\nThis is my last email, I promise.\n\nI've been trying to connect about helping {{company}} with your paid advertising, but I'm getting the sense the timing isn't right.\n\nNo hard feelings - I'll stop filling up your inbox.\n\nIf you ever want to chat about cutting your ad costs, just reply to this email. I'll still be here.\n\n{{sender_name}}\n\nP.S. - If you've been ignoring me because my emails are terrible, I'd genuinely appreciate the feedback.",
+      "style": "light_humor",
+      "tone": "casual",
+      "notes": "Light humor, self-deprecating PS often gets responses"
+    },
+    {
+      "id": "breakup_one_liner",
+      "type": "full_email",
+      "position": "breakup",
+      "delay_days": 7,
+      "subject": "?",
+      "body": "{{first_name}} - should I keep trying or let this go?",
+      "style": "ultra_short",
+      "tone": "direct",
+      "notes": "Extremely short, high reply rate, polarizing"
+    }
+  ],
+  "subject_line_variants": [
+    {
+      "text": "Quick question about {{company}}",
+      "style": "curiosity",
+      "position": "initial"
+    },
+    {
+      "text": "{{first_name}} - idea for {{company}}",
+      "style": "personalized",
+      "position": "initial"
+    },
+    {
+      "text": "Thought this might help",
+      "style": "helpful",
+      "position": "initial"
+    },
+    {
+      "text": "{{company}}'s ad performance",
+      "style": "direct",
+      "position": "initial"
+    },
+    {
+      "text": "Not sure if this is relevant",
+      "style": "humble",
+      "position": "initial"
+    },
+    {
+      "text": "Re: Quick question about {{company}}",
+      "style": "reply_thread",
+      "position": "followup"
+    },
+    {
+      "text": "Following up",
+      "style": "simple",
+      "position": "followup"
+    },
+    {
+      "text": "One more thing",
+      "style": "curiosity",
+      "position": "followup"
+    },
+    {
+      "text": "Should I close your file?",
+      "style": "breakup",
+      "position": "breakup"
+    },
+    {
+      "text": "Closing the loop",
+      "style": "professional_breakup",
+      "position": "breakup"
+    },
+    {
+      "text": "?",
+      "style": "ultra_short",
+      "position": "breakup"
+    }
+  ],
+  "sequence_examples": {
+    "standard_3_email": {
+      "description": "Most common sequence - curiosity opener, value followup, soft breakup",
+      "emails": ["initial_curiosity_1", "followup_1_value", "breakup_classic"],
+      "timing": [0, 3, 7]
+    },
+    "aggressive_5_email": {
+      "description": "More persistent sequence for high-value prospects",
+      "emails": ["initial_direct_1", "followup_1_short", "followup_2_social_proof", "followup_3_resource", "breakup_classic"],
+      "timing": [0, 2, 5, 8, 12]
+    },
+    "soft_2_email": {
+      "description": "Minimal sequence for warm leads or referrals",
+      "emails": ["initial_value_first_1", "breakup_one_liner"],
+      "timing": [0, 5]
+    }
+  },
+  "best_practices": [
+    "Keep subject lines under 50 characters",
+    "First email should be 100-150 words max",
+    "Always personalize with {{icebreaker}} when available",
+    "Each follow-up should add new value, not just 'checking in'",
+    "Breakup emails often get highest reply rates - make them count",
+    "Test different styles to find what works for your audience",
+    "Reply-style subjects ('Re: ...') increase open rates but use sparingly",
+    "One CTA per email - don't confuse the reader"
+  ]
+}

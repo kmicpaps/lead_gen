@@ -1,0 +1,88 @@
+# ============================================
+# Credentials & Secrets (NEVER commit)
+# ============================================
+.env
+.env.*
+!.env.example
+credentials.json
+token.json
+
+# ============================================
+# Claude Code (track skills only)
+# ============================================
+.claude/*
+!.claude/skills/
+!.claude/skills/**
+
+# ============================================
+# Campaign data (client PII — NEVER commit)
+# ============================================
+campaigns/*
+!campaigns/_template/
+!campaigns/_template/**
+!campaigns/README.md
+
+# ============================================
+# Internal development docs (pipeline-specific)
+# ============================================
+docs/PRD_*.md
+docs/PROGRESS_*.md
+docs/PIPELINE_AUDIT_*.md
+docs/CONTEXT_*.md
+docs/QUICK_START_*.md
+docs/IMPLEMENTATION_PLAN.md
+docs/SETUP.md
+docs/WORKFLOW_FIXES_*.md
+
+# ============================================
+# Temporary & intermediate files
+# ============================================
+.tmp/
+*.backup.json
+
+# ============================================
+# Loose data files in root (prevent accidents)
+# ============================================
+*.csv
+*.xlsx
+
+# ============================================
+# Python
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+ENV/
+env/
+
+# ============================================
+# IDE & OS
+# ============================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Windows reserved filename
+nul
