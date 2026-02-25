@@ -275,13 +275,23 @@ AI enrichment is **expensive and slow**. Make it opt-in:
 
 ## Performance Benchmarks
 
-| Workflow Variant | Lead Count | Time | Cost |
-|-----------------|-----------|------|------|
-| Fast-track (Olympus only) | 1,000 | 6-7 min | $1 |
-| Standard (3 scrapers) | 1,500 | 15-20 min | $3-5 |
-| With email validation | 1,500 | 18-23 min | $3.50-5.50 |
-| With AI enrichment | 1,000 | 35-45 min | $5-8 |
-| Full pipeline | 1,500 | 50-60 min | $10-15 |
+### Scraper Pricing (per 1k leads)
+
+| Scraper | Cost/1k | Source | Notes |
+|---------|---------|--------|-------|
+| Olympus | $1.82 | Apify | Best quality, needs cookies |
+| PeakyDev | $1.76 | Apify | Cheapest, min 1000 leads |
+| CodeCrafter | $2.00 | RapidAPI | Most expensive per lead |
+
+### Workflow Cost Estimates
+
+| Workflow Variant | Lead Count | Time | Est. Cost |
+|-----------------|-----------|------|-----------|
+| Fast-track (Olympus only) | 1,000 | 6-7 min | ~$1.82 |
+| Standard (3 scrapers) | 1,500 | 15-20 min | ~$8-9 |
+| With email validation | 1,500 | 18-23 min | ~$9-10 |
+| With AI enrichment | 1,000 | 35-45 min | ~$6-8 |
+| Full pipeline | 1,500 | 50-60 min | ~$12-15 |
 
 ## Apollo URL Construction
 

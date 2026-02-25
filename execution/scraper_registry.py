@@ -75,6 +75,9 @@ SCRAPER_REGISTRY = {
         # Orchestrator behavior
         "role": "primary",       # "primary" runs first solo, "backup" runs in parallel
         "timeout": 600,
+
+        # Pricing (USD per 1k leads, based on observed Apify costs)
+        "pricing": {"cost_per_1k": 1.82},
     },
 
     "codecrafter": {
@@ -111,6 +114,9 @@ SCRAPER_REGISTRY = {
 
         "role": "backup",
         "timeout": 600,
+
+        # Pricing (USD per 1k leads, based on observed RapidAPI costs)
+        "pricing": {"cost_per_1k": 2.00},
     },
 
     "peakydev": {
@@ -151,6 +157,9 @@ SCRAPER_REGISTRY = {
 
         "role": "backup",
         "timeout": 600,
+
+        # Pricing (USD per 1k leads, based on observed Apify costs)
+        "pricing": {"cost_per_1k": 1.76},
     },
 }
 

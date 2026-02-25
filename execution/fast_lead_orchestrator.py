@@ -185,7 +185,7 @@ def run_scraper_parallel(scrapers):
     return results
 
 
-def pre_flight(apollo_url, country_code, selected_scrapers=None):
+def pre_flight(apollo_url, country_code, selected_scrapers=None, target_leads=None):
     """
     Parse Apollo URL and show how filters map to each scraper (registry-driven).
     Returns the parsed apollo_filters dict.
@@ -296,6 +296,24 @@ def pre_flight(apollo_url, country_code, selected_scrapers=None):
     print(f"    Require: email, website/domain")
     if country_code:
         print(f"    Remove: foreign TLDs, phone/country discrepancies")
+
+    # --- Cost estimates ---
+    print(f"\n  {'-'*60}")
+    print(f"  ESTIMATED COSTS:")
+    total_cost = 0.0
+    for name, config in SCRAPER_REGISTRY.items():
+        if name not in scrapers_to_show:
+            continue
+        pricing = config.get("pricing", {})
+        cost_per_1k = pricing.get("cost_per_1k", 0)
+        label = config["display_name"]
+        leads_for_estimate = target_leads if target_leads else 1000
+        est = cost_per_1k * leads_for_estimate / 1000
+        total_cost += est
+        print(f"    {label:15s} ${cost_per_1k:.2f}/1k leads   (~${est:.2f} for {leads_for_estimate:,} leads)")
+    if target_leads:
+        print(f"    {'─'*45}")
+        print(f"    {'Total estimate':15s} ~${total_cost:.2f} (before dedup overlap)")
     print(f"{'='*70}")
 
     return apollo_filters
@@ -369,7 +387,7 @@ def main():
 
     # STEP 0: Pre-flight — show filter mapping per scraper
     try:
-        apollo_filters = pre_flight(args.apollo_url, args.country, selected_scrapers)
+        apollo_filters = pre_flight(args.apollo_url, args.country, selected_scrapers, args.target_leads)
     except Exception as e:
         print(f"[WARNING] Pre-flight failed: {e}")
         apollo_filters = None

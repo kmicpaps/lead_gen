@@ -26,16 +26,19 @@ You operate within a 3-layer architecture that separates concerns to maximize re
 
 ## Operating Principles
 
-**1. Check for tools first**
+**1. NEVER read .env or credential files**
+Never use `cat`, `Read`, or any tool to view `.env`, `credentials.json`, or `token.json`. These contain API keys and secrets that must not enter conversation context. Scripts access them via `os.getenv()` / `load_dotenv()` at runtime — that's the only safe path.
+
+**2. Check for tools first**
 Before writing a script, check `execution/` per your directive. Only create new scripts if none exist.
 
-**2. Self-anneal when things break**
+**3. Self-anneal when things break**
 - Read error message and stack trace
 - Fix the script and test it again (unless it uses paid tokens/credits/etc—in which case you check w user first)
 - Update the directive with what you learned (API limits, timing, edge cases)
 - Example: you hit an API rate limit → you then look into API → find a batch endpoint that would fix → rewrite script to accommodate → test → update directive.
 
-**3. Update directives as you learn**
+**4. Update directives as you learn**
 Directives are living documents. When you discover API constraints, better approaches, common errors, or timing expectations—update the directive. But don't create or overwrite directives without asking unless explicitly told to. Directives are your instruction set and must be preserved (and improved upon over time, not extemporaneously used and then discarded).
 
 ## Self-annealing loop
