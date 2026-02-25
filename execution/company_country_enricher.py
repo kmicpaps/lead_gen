@@ -116,6 +116,11 @@ def enrich_domains(domains, api_key):
 
     results = {}
     total = len(domains)
+
+    if not domains:
+        print("No domains to look up")
+        return results
+
     start_time = time.time()
 
     print(f"Looking up {total} unique domains ({MAX_WORKERS} workers, {RATE_LIMIT}/sec)...")
@@ -164,10 +169,10 @@ def enrich_domains(domains, api_key):
                     progress['processed'] += 1
                     progress['errors'] += 1
 
-    elapsed = time.time() - start_time
+    elapsed = max(time.time() - start_time, 0.1)
     print(f"\nDomain lookup complete in {elapsed:.0f}s ({total / elapsed:.1f}/sec)")
-    print(f"  Found: {progress['found']}/{total} ({progress['found']/total*100:.0f}%)")
-    print(f"  Found w/ country: {progress['found_with_country']}/{total} ({progress['found_with_country']/total*100:.0f}%)")
+    print(f"  Found: {progress['found']}/{total} ({progress['found']/max(total,1)*100:.0f}%)")
+    print(f"  Found w/ country: {progress['found_with_country']}/{total} ({progress['found_with_country']/max(total,1)*100:.0f}%)")
     print(f"  Not found: {progress['not_found']}/{total}")
     print(f"  Errors: {progress['errors']}/{total}")
     print(f"  Credits consumed: {progress['credits']}")

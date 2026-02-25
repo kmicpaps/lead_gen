@@ -9,11 +9,15 @@ https://app.apollo.io/#/people?page=1&contactEmailStatusV2[]=verified&personTitl
 This script parses the URL and returns a structured dictionary of filters.
 """
 
+import os
 import sys
 import json
 import re
 import argparse
 from urllib.parse import urlparse, parse_qs, unquote
+
+# Ensure sibling imports work when this module is imported from other contexts
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 def parse_apollo_url(url):
@@ -99,7 +103,9 @@ def parse_apollo_url(url):
                 print(f"Backup scrapers will NOT filter by these industries.", file=_sys.stderr)
                 print(f"Fix with: py execution/apollo_industry_resolver.py --add HEX_ID \"Name\"",
                       file=_sys.stderr)
-        except ImportError:
+        except Exception as e:
+            import sys as _sys
+            print(f"WARNING: Industry resolution failed: {e}", file=_sys.stderr)
             filters['industries_resolved'] = []
             filters['industries_unresolved'] = filters['industries'][:]
 

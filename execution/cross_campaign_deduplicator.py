@@ -14,11 +14,10 @@ import os
 import sys
 import argparse
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
-# Add parent directory to path for imports
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+# Add execution/ to path for sibling imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from utils import load_json, save_json
 
@@ -29,17 +28,29 @@ def normalize_key(text):
     return str(text).lower().strip()
 
 
+def normalize_linkedin_url(url):
+    """Normalize LinkedIn URL for dedup comparison."""
+    if not url:
+        return ''
+    url = str(url).lower().strip()
+    url = url.replace('https://', '').replace('http://', '')
+    url = url.replace('www.', '')
+    url = url.rstrip('/')
+    url = url.split('?')[0]
+    return url
+
+
 def get_lead_keys(lead):
     """
     Extract unique identifiers from a lead for deduplication.
     Returns: (email_key, linkedin_key, name_org_key)
     """
     email_key = normalize_key(lead.get('email', ''))
-    linkedin_key = normalize_key(lead.get('linkedin_url', ''))
+    linkedin_key = normalize_linkedin_url(lead.get('linkedin_url', ''))
 
     # Fallback: name + organization
     name = normalize_key(lead.get('name', ''))
-    org = normalize_key(lead.get('organization_name', ''))
+    org = normalize_key(lead.get('company_name', '') or lead.get('org_name', ''))
     name_org_key = f"{name}|{org}" if name and org else ''
 
     return email_key, linkedin_key, name_org_key
@@ -121,6 +132,20 @@ def deduplicate_campaigns(client_id, dry_run=False, campaigns_filter=None):
 
     campaigns = client_data.get('campaigns', [])
     if not campaigns:
+        # Fallback: scan filesystem for campaign folders not registered in client.json
+        apollo_dir = Path(f'campaigns/{client_id}/apollo_lists')
+        if apollo_dir.exists():
+            for folder in sorted(apollo_dir.iterdir()):
+                if folder.is_dir() and any(folder.glob('*.json')):
+                    campaigns.append({
+                        'campaign_id': folder.name,
+                        'campaign_name': folder.name,
+                        'created_at': '',
+                        'lead_count': 0,
+                    })
+            if campaigns:
+                print(f"No campaigns in client.json — discovered {len(campaigns)} from filesystem")
+    if not campaigns:
         print(f"No campaigns found for client: {client_id}")
         return 0
 
@@ -134,7 +159,7 @@ def deduplicate_campaigns(client_id, dry_run=False, campaigns_filter=None):
     print(f"\n{'='*70}")
     print(f"Cross-Campaign Deduplication Report")
     print(f"{'='*70}")
-    print(f"Client: {client_data['company_name']} ({client_id})")
+    print(f"Client: {client_data.get('company_name', client_id)} ({client_id})")
     print(f"Total Campaigns: {len(campaigns)}")
     print(f"Mode: {'DRY RUN (no changes will be made)' if dry_run else 'LIVE (will update files and sheets)'}")
     print(f"\n")
@@ -265,7 +290,7 @@ def deduplicate_campaigns(client_id, dry_run=False, campaigns_filter=None):
 
     # Update client.json with new lead counts
     if not dry_run:
-        client_data['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+        client_data['updated_at'] = datetime.now(timezone.utc).isoformat() + 'Z'
         save_json(client_data, str(client_file))
         print(f"[OK] Updated client.json with new lead counts")
         print(f"")

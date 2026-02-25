@@ -165,7 +165,7 @@ def read_apify_key_from_env():
             for line in f:
                 if line.startswith('APIFY_API_KEY='):
                     return line.split('=', 1)[1].strip()
-    except:
+    except Exception:
         pass
     return os.getenv('APIFY_API_KEY')
 

@@ -24,6 +24,7 @@ import json
 import argparse
 import time
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse, unquote
 from apify_client import ApifyClient
 
@@ -87,7 +88,7 @@ def detect_country_from_url(apollo_url):
             return 'SE'
 
         return 'US'  # Final fallback
-    except:
+    except Exception:
         return 'US'
 
 def normalize_apollo_url(apollo_url):
@@ -118,7 +119,7 @@ def normalize_apollo_url(apollo_url):
 
         # Reconstruct URL
         return f"{parsed.scheme}://{parsed.netloc}{parsed.path}#{new_fragment}"
-    except:
+    except Exception:
         # If normalization fails, return original URL
         return apollo_url
 
@@ -153,7 +154,7 @@ def normalize_lead_to_schema(lead):
         'seniority': lead.get('seniority', ''),
         'departments': lead.get('departments', []),
         'headline': lead.get('headline', ''),
-        'source': 'apify_b2b_finder'
+        'source': 'olympus'
     }
 
 
@@ -213,7 +214,7 @@ def main():
                         try:
                             import json5
                             apollo_cookie = json5.loads(apollo_cookie_str)
-                        except:
+                        except Exception:
                             print(f"Error: Could not parse APOLLO_COOKIE. JSON error: {e}", file=sys.stderr)
                             print(f"Cookie string length: {len(apollo_cookie_str)}", file=sys.stderr)
                             print(f"First 200 chars: {apollo_cookie_str[:200]}", file=sys.stderr)
@@ -252,10 +253,26 @@ def main():
         print("\nStarting Apify actor run...")
         print(f"Actor: olympus/b2b-leads-finder")
 
-        # Run the actor and wait for it to finish
-        run = client.actor("olympus/b2b-leads-finder").call(run_input=run_input)
+        # Start the actor (non-blocking) so we can save run ID immediately
+        started_run = client.actor("olympus/b2b-leads-finder").start(run_input=run_input)
+        run_id = started_run['id']
+        print(f"Actor run ID: {run_id}")
 
-        print(f"Actor run ID: {run['id']}")
+        # Save run ID for recovery (if local process is killed, Apify run continues)
+        run_id_file = Path(args.output_dir) / '.active_run.json'
+        run_id_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(run_id_file, 'w', encoding='utf-8') as _f:
+            json.dump({'run_id': run_id, 'actor': 'olympus/b2b-leads-finder',
+                       'started_at': datetime.now().isoformat()}, _f)
+        print(f"Run ID saved to: {run_id_file}")
+
+        # Wait for the actor to finish
+        print("Waiting for actor to complete...")
+        run = client.run(run_id).wait_for_finish()
+
+        # Clean up run ID file
+        run_id_file.unlink(missing_ok=True)
+
         print(f"Status: {run['status']}")
 
         # Check if run was successful
@@ -314,10 +331,17 @@ def main():
             print("This may indicate a cookie validation issue.", file=sys.stderr)
             print("If this persists, refresh your Apollo cookies.", file=sys.stderr)
 
-        print(f"Downloaded {len(dataset_items)} leads")
+        # Filter out status/notification messages from actor output
+        junk_patterns = ['\U0001f440', '\u23f3', '\U0001f4c8', '\U0001f7e2', 'Actor speed', 'Scanning pages',
+                         'enhance scraping', 'check the log', 'bear with us']
+        real_leads = [item for item in dataset_items
+                      if not any(p in str(item.get('name', '')) for p in junk_patterns)]
+        if len(real_leads) < len(dataset_items):
+            print(f"Filtered out {len(dataset_items) - len(real_leads)} status messages from actor output")
+        print(f"Downloaded {len(real_leads)} leads")
 
         # Normalize leads to standardized schema
-        normalized_leads = [normalize_lead_to_schema(lead) for lead in dataset_items]
+        normalized_leads = [normalize_lead_to_schema(lead) for lead in real_leads]
 
         # Save results
         os.makedirs(args.output_dir, exist_ok=True)

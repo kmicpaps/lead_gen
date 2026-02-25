@@ -9,7 +9,7 @@ Generate personalized icebreaker messages for cold outreach by scraping company 
 
 ## Tools
 - `execution/scrape_website_content.py` - Website scraper utility
-- `execution/enrich_icebreakers.py` - AI-powered icebreaker generator
+- `execution/ai_icebreaker_generator.py` - AI-powered icebreaker generator
 
 ## Output
 - JSON file with added `icebreaker` field
@@ -142,32 +142,32 @@ For failed enrichments:
 
 **Basic usage (OpenAI, no template):**
 ```bash
-py execution/enrich_icebreakers.py --input leads.json
+py execution/ai_icebreaker_generator.py --input leads.json
 ```
 
 **Use Anthropic instead:**
 ```bash
-py execution/enrich_icebreakers.py --input leads.json --ai-provider anthropic
+py execution/ai_icebreaker_generator.py --input leads.json --ai-provider anthropic
 ```
 
 **With user template:**
 ```bash
-py execution/enrich_icebreakers.py --input leads.json --template my_template.txt
+py execution/ai_icebreaker_generator.py --input leads.json --template my_template.txt
 ```
 
 **Skip scraping (use existing website_content):**
 ```bash
-py execution/enrich_icebreakers.py --input leads.json --skip-scraping
+py execution/ai_icebreaker_generator.py --input leads.json --skip-scraping
 ```
 
 **Force regenerate existing icebreakers:**
 ```bash
-py execution/enrich_icebreakers.py --input leads.json --force-regenerate
+py execution/ai_icebreaker_generator.py --input leads.json --force-regenerate
 ```
 
 **Custom output directory:**
 ```bash
-py execution/enrich_icebreakers.py --input leads.json --output-dir .tmp/icebreakers
+py execution/ai_icebreaker_generator.py --input leads.json --output-dir .tmp/icebreakers
 ```
 
 ## Error Handling
@@ -260,7 +260,7 @@ If validation fails:
 Before full run, test with sample data:
 ```bash
 # Test with 5 leads
-py execution/enrich_icebreakers.py --input sample_5leads.json --output-dir .tmp/test
+py execution/ai_icebreaker_generator.py --input sample_5leads.json --output-dir .tmp/test
 ```
 
 Expected output:
@@ -302,10 +302,10 @@ py execution/enrich_emails_leadmagic_fast.py --input verified_leads.json
 # ... cleanup script ...
 
 # Step 6: AI Enrichment - Casual names (NEW)
-py execution/enrich_casual_org_names.py --input cleaned_leads.json
+py execution/ai_casual_name_generator.py --input cleaned_leads.json
 
 # Step 7: AI Enrichment - Icebreakers (NEW)
-py execution/enrich_icebreakers.py --input casual_enriched_leads.json
+py execution/ai_icebreaker_generator.py --input casual_enriched_leads.json
 
 # Step 8: Export to Google Sheets (existing, updated)
 py execution/upload_to_google_sheet.py --input icebreaker_enriched_leads.json

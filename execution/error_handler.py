@@ -29,7 +29,7 @@ def parse_rapidapi_error(error_response, error_message=''):
     if hasattr(error_response, 'json'):
         try:
             response_data = error_response.json()
-        except:
+        except Exception:
             response_data = {}
     elif isinstance(error_response, dict):
         response_data = error_response
@@ -139,7 +139,7 @@ def parse_apify_error(error_response, error_message=''):
     if hasattr(error_response, 'json'):
         try:
             response_data = error_response.json()
-        except:
+        except Exception:
             response_data = {}
     elif isinstance(error_response, dict):
         response_data = error_response

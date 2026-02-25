@@ -28,7 +28,7 @@ def extract_domain_from_url(url: str) -> str:
         parsed = urlparse(str(url))
         domain = parsed.netloc or parsed.path
         return domain.replace('www.', '')
-    except:
+    except Exception:
         return ''
 
 

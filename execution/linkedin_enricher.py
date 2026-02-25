@@ -17,7 +17,7 @@ import argparse
 import requests
 import time
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
@@ -151,7 +151,7 @@ def enrich_single_profile(lead, api_key, rate_limiter):
                 ]
 
             # Metadata
-            lead['linkedin_enriched_at'] = datetime.utcnow().isoformat() + 'Z'
+            lead['linkedin_enriched_at'] = datetime.now(timezone.utc).isoformat() + 'Z'
             lead['linkedin_enrichment_credits'] = credits
 
             return lead, 'success', credits
@@ -184,7 +184,7 @@ def enrich_single_profile(lead, api_key, rate_limiter):
                 lead['linkedin_location'] = result.get('location') or ''
                 lead['linkedin_tenure_years'] = result.get('total_tenure_years') or ''
                 lead['linkedin_followers'] = result.get('followers_range') or ''
-                lead['linkedin_enriched_at'] = datetime.utcnow().isoformat() + 'Z'
+                lead['linkedin_enriched_at'] = datetime.now(timezone.utc).isoformat() + 'Z'
                 lead['linkedin_enrichment_credits'] = credits
 
                 return lead, 'success', credits

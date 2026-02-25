@@ -491,8 +491,8 @@ def main():
     print(f"  SUMMARY")
     print(f"{'='*50}")
     print(f"  Input:     {len(leads)} leads")
-    print(f"  Kept:      {len(kept_leads)} leads ({len(kept_leads)/len(leads)*100:.1f}%)")
-    print(f"  Removed:   {len(removed_leads)} leads ({len(removed_leads)/len(leads)*100:.1f}%)")
+    print(f"  Kept:      {len(kept_leads)} leads ({len(kept_leads)/max(len(leads),1)*100:.1f}%)")
+    print(f"  Removed:   {len(removed_leads)} leads ({len(removed_leads)/max(len(leads),1)*100:.1f}%)")
     print(f"  Mode:      {'exclude' if args.exclude_maybe else 'include'} maybe-scored industries")
     print(f"{'='*50}")
 

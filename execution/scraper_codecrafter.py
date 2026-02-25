@@ -17,6 +17,7 @@ import sys
 import json
 import argparse
 from datetime import datetime
+from pathlib import Path
 from apify_client import ApifyClient
 from dotenv import load_dotenv
 
@@ -24,7 +25,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import Apollo URL parser
-sys.path.append(os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from apollo_url_parser import parse_apollo_url, extract_validation_keywords
 
 
@@ -91,25 +92,31 @@ def map_apollo_to_codecrafter(apollo_filters):
 
     # Map company size
     if apollo_filters.get('company_size'):
-        # Apollo format: ["1,10", "11,20", "21,50"] -> Code_Crafter format: ["1-10", "11-20", "21-50"]
+        # Apollo uses broad ranges (e.g. "11,50", "51,200") that must be expanded
+        # into CodeCrafter's granular buckets (e.g. "11-20", "21-50", "51-100", "101-200")
         size_map = {
             '1,10': '1-10',
             '11,20': '11-20',
-            '11,50': '11-50',
+            '11,50': ['11-20', '21-50'],
             '21,50': '21-50',
             '51,100': '51-100',
+            '51,200': ['51-100', '101-200'],
             '101,200': '101-200',
             '201,500': '201-500',
             '501,1000': '501-1000',
             '1001,2000': '1001-2000',
+            '1001,5000': ['1001-2000', '2001-5000'],
             '2001,5000': '2001-5000',
             '5001,10000': '5001-10000',
-            '10001': ['10001-20000', '20001-50000', '50000+'],  # 10001+ means all large companies
-            '10001+': ['10001-20000', '20001-50000', '50000+']
+            '10001': ['10001-20000', '20001-50000', '50000+'],
+            '10001+': ['10001-20000', '20001-50000', '50000+'],
         }
         mapped_sizes = []
         for size in apollo_filters['company_size']:
-            mapped_size = size_map.get(size, size.replace(',', '-'))  # Fallback: replace comma with dash
+            mapped_size = size_map.get(size)
+            if mapped_size is None:
+                print(f"  WARNING: Unknown company size '{size}', skipping (valid Apollo sizes: 1,10 / 11,50 / 51,200 / 201,500 / etc.)", file=sys.stderr)
+                continue
             # Handle cases where mapped_size is a list (like 10001+)
             if isinstance(mapped_size, list):
                 for s in mapped_size:
@@ -186,7 +193,7 @@ def extract_org_keywords_from_url(apollo_url):
             org_keywords = [unquote(kw) for kw in params['qOrganizationKeywordTags[]']]
 
         return org_keywords
-    except:
+    except Exception:
         return []
 
 
@@ -203,7 +210,7 @@ def normalize_lead_to_schema(lead):
         try:
             parsed = urlparse(website_url if website_url.startswith('http') else f'http://{website_url}')
             company_domain = parsed.netloc.replace('www.', '')
-        except:
+        except Exception:
             company_domain = ''
 
     return {
@@ -222,7 +229,7 @@ def normalize_lead_to_schema(lead):
         'company_linkedin': lead.get('company_linkedin', ''),
         'company_domain': company_domain,
         'industry': lead.get('industry', ''),
-        'source': 'codecrafter_leads_finder'
+        'source': 'codecrafter'
     }
 
 
@@ -337,11 +344,25 @@ def run_codecrafter_scraper(apollo_url, max_leads, output_dir='.tmp/codecrafter'
         # Initialize Apify client
         client = ApifyClient(apify_api_key)
 
-        # Run the actor
+        # Start the actor (non-blocking) so we can save run ID immediately
         print(f"\nStarting Apify actor: code_crafter/leads-finder...")
-        run = client.actor("code_crafter/leads-finder").call(run_input=codecrafter_input)
+        started_run = client.actor("code_crafter/leads-finder").start(run_input=codecrafter_input)
+        run_id = started_run['id']
+        print(f"Actor run ID: {run_id}")
 
-        print(f"Actor run ID: {run['id']}")
+        # Save run ID for recovery (if local process is killed, Apify run continues)
+        run_id_file = Path(output_dir) / '.active_run.json'
+        run_id_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(run_id_file, 'w', encoding='utf-8') as _f:
+            json.dump({'run_id': run_id, 'actor': 'code_crafter/leads-finder',
+                       'started_at': datetime.now().isoformat()}, _f)
+
+        # Wait for the actor to finish
+        run = client.run(run_id).wait_for_finish()
+
+        # Clean up run ID file
+        run_id_file.unlink(missing_ok=True)
+
         print(f"Status: {run['status']}")
 
         # Check if run was successful

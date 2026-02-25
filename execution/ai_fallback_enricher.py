@@ -15,6 +15,10 @@ from utils import RateLimiter
 
 def extract_org_name(lead):
     """Extract organization name from nested structure or flat field."""
+    # Check company_name first (canonical), then org_name (scraper output)
+    name = lead.get('company_name', '')
+    if name:
+        return str(name)
     org = lead.get('org_name', '')
     if isinstance(org, dict):
         return org.get('name', '')
@@ -129,7 +133,7 @@ def main():
     try:
         from dotenv import load_dotenv
         load_dotenv()
-    except:
+    except Exception:
         pass
 
     api_key = os.getenv('OPENAI_API_KEY')

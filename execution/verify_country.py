@@ -205,6 +205,16 @@ def classify_lead(lead, country_code):
 
     # Gather signals
     domain = (lead.get("company_domain") or "").lower().strip()
+    if not domain:
+        # Fallback: derive domain from website_url (Olympus scraper doesn't output company_domain)
+        from urllib.parse import urlparse as _urlparse
+        _website = lead.get("website_url", "") or lead.get("company_website", "")
+        if _website:
+            try:
+                _parsed = _urlparse(_website if _website.startswith("http") else f"http://{_website}")
+                domain = _parsed.netloc.replace("www.", "").lower().strip()
+            except Exception:
+                pass
     email = (lead.get("email") or "").lower().strip()
     domain_tld = get_domain_tld(domain)
     email_tld = get_domain_tld(email.split("@")[-1]) if "@" in email else ""
@@ -430,6 +440,7 @@ def main():
         lead.pop("_country_classification", None)
 
     if rejected:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         rejected_path = os.path.join(
             args.output_dir,
             f"rejected_{timestamp}_{len(rejected)}leads.json"

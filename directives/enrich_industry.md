@@ -201,7 +201,7 @@ py execution/fast_lead_orchestrator.py --client-id acme_corp --campaign-name "La
 py execution/ai_industry_enricher.py --input .tmp/merged_latvia_leads_20251222.json --output-dir campaigns/acme_corp/apollo_lists/latvia_20251222
 
 # Step 3: Optional AI enrichments (existing)
-py execution/enrich_casual_org_names.py --input campaigns/acme_corp/.../industry_enriched_*.json
+py execution/ai_casual_name_generator.py --input campaigns/acme_corp/.../industry_enriched_*.json
 py execution/ai_icebreaker_generator.py --input .tmp/casual_enriched_*.json
 
 # Step 4: Export to Google Sheets (existing, now includes Industry column)

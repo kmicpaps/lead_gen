@@ -38,11 +38,11 @@ def get_company_website(lead):
     Extract company website from lead, handling both flat and nested formats.
     Returns: website URL string or empty string
     """
-    # Try flat field first
-    website_value = lead.get('company_website', '')
+    # Try flat fields first (company_website or website_url from scraper output)
+    website_value = lead.get('company_website', '') or lead.get('website_url', '')
     website = website_value.strip() if website_value else ''
 
-    # If empty, try nested org_name object (B2B finder format)
+    # If empty, try nested org_name object (B2B finder raw format)
     if not website and 'org_name' in lead:
         org_name_obj = lead.get('org_name', {})
         if isinstance(org_name_obj, dict):
@@ -104,9 +104,9 @@ def generate_icebreaker_openai(lead, api_key, rate_limiter, user_template=None):
         client = openai.OpenAI(api_key=api_key)
 
         # Prepare lead info
-        full_name = lead.get('full_name', '').strip()
-        company_name = lead.get('casual_org_name', '') or lead.get('company_name', '')
-        job_title = lead.get('job_title', '').strip()
+        full_name = (lead.get('name', '') or lead.get('full_name', '')).strip()
+        company_name = lead.get('casual_org_name', '') or lead.get('company_name', '') or lead.get('org_name', '')
+        job_title = (lead.get('title', '') or lead.get('job_title', '')).strip()
         website_content = lead.get('website_content', '').strip()
 
         if not website_content or len(website_content) < 50:
@@ -199,9 +199,9 @@ def generate_icebreaker_anthropic(lead, api_key, rate_limiter, user_template=Non
         client = anthropic.Anthropic(api_key=api_key)
 
         # Prepare lead info
-        full_name = lead.get('full_name', '').strip()
-        company_name = lead.get('casual_org_name', '') or lead.get('company_name', '')
-        job_title = lead.get('job_title', '').strip()
+        full_name = (lead.get('name', '') or lead.get('full_name', '')).strip()
+        company_name = lead.get('casual_org_name', '') or lead.get('company_name', '') or lead.get('org_name', '')
+        job_title = (lead.get('title', '') or lead.get('job_title', '')).strip()
         website_content = lead.get('website_content', '').strip()
 
         if not website_content or len(website_content) < 50:

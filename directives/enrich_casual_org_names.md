@@ -8,7 +8,7 @@ Generate human-friendly, casual versions of formal company names for use in pers
 - Optional: `--force-regenerate` flag to regenerate existing casual names
 
 ## Tools
-- `execution/enrich_casual_org_names.py` - AI-powered casual name generator
+- `execution/ai_casual_name_generator.py` - AI-powered casual name generator
 
 ## Output
 - JSON file with added `casual_org_name` field
@@ -79,22 +79,22 @@ For failed enrichments:
 
 **Basic usage (OpenAI):**
 ```bash
-py execution/enrich_casual_org_names.py --input leads.json
+py execution/ai_casual_name_generator.py --input leads.json
 ```
 
 **Use Anthropic instead:**
 ```bash
-py execution/enrich_casual_org_names.py --input leads.json --ai-provider anthropic
+py execution/ai_casual_name_generator.py --input leads.json --ai-provider anthropic
 ```
 
 **Force regenerate existing casual names:**
 ```bash
-py execution/enrich_casual_org_names.py --input leads.json --force-regenerate
+py execution/ai_casual_name_generator.py --input leads.json --force-regenerate
 ```
 
 **Custom output directory:**
 ```bash
-py execution/enrich_casual_org_names.py --input leads.json --output-dir .tmp/ai_enriched
+py execution/ai_casual_name_generator.py --input leads.json --output-dir .tmp/ai_enriched
 ```
 
 ## Error Handling
@@ -165,7 +165,7 @@ If validation fails:
 Before full run, test with sample data:
 ```bash
 # Test with 10 leads
-py execution/enrich_casual_org_names.py --input sample_10leads.json --output-dir .tmp/test
+py execution/ai_casual_name_generator.py --input sample_10leads.json --output-dir .tmp/test
 ```
 
 Expected output:

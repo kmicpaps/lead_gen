@@ -1,133 +1,64 @@
-# Lead Generation Workflow V5 (Optimized for Speed)
+# Lead Generation Workflow V8 (Parallel-First)
 
-**Status:** Active workflow - Optimized for speed
+**Status:** Active workflow
 **Created:** December 5, 2025
-**Supersedes:** lead_generation_v4_final.md
+**Updated:** February 25, 2026 — V8: User picks scrapers upfront, all run in parallel
+**Supersedes:** V5/V7 (Olympus-first sequential flow)
 
-## Key Optimizations
+## Design Philosophy
 
-This version reduces workflow time by **60-80%** through:
-1. **Smart scraper routing** - Skip redundant scrapers when Olympus succeeds
-2. **Optional enrichment** - Make AI enrichment opt-in, not mandatory
-3. **Parallel execution** - Run independent operations concurrently
-4. **Reduced validation** - Skip validation tests when using Olympus directly
+User picks which scrapers to run **before** scraping starts. All selected scrapers run **in parallel**. No more "try Olympus first, then decide" — the user sees costs, time estimates, and filter support upfront and makes the call.
 
-## Fast-Track Workflow (3-Step Minimum)
+## Scraper Reference
 
-For campaigns where Olympus works and enrichment isn't needed:
+| Scraper | Cost/1k | Speed | Min Leads | Notes |
+|---------|---------|-------|-----------|-------|
+| Olympus | $1.82 | ~26 leads/min | None | Needs Apollo cookies |
+| CodeCrafter | $2.00 | ~345 leads/min | 25 | Fastest scraper |
+| PeakyDev | $1.76 | ~286 leads/min | 1,000 | Cheapest per lead |
 
-```
-1. Scrape with olympus/b2b-leads-finder (5-6 min for 1000 leads)
-2. Cross-campaign deduplication (if client has existing campaigns) (30 sec)
-3. Upload to Google Sheets (30 sec)
+**Time estimates for 1,000 leads:**
+- Olympus: ~38 min
+- CodeCrafter: ~3 min
+- PeakyDev: ~4 min
+- All 3 in parallel: ~38 min (Olympus is bottleneck)
 
-Total: ~6-7 minutes for 1000 leads ✅
-```
-
-## Standard Workflow (When Olympus Gets Enough Leads)
-
-```
-1. ⚠️ ALWAYS TRY FIRST: olympus/b2b-leads-finder
-   - If gets ≥ target leads → Skip to step 5
-   - If gets < target leads → Continue to step 2
-
-2. [SKIP if olympus successful] Pre-scrape filter gap analysis
-   - Run: py execution/filter_gap_analyzer.py --apollo-url "URL"
-   - Show user which filters each backup scraper handles vs drops
-   - If non-enforceable filters exist (revenue, funding, functions),
-     ask user: proceed anyway or wait for Olympus cookies?
-   - Calculate oversample multiplier per scraper
-
-3. [SKIP if olympus successful] Calculate remaining leads needed
-   - Parse Apollo URL → resolve industry hex IDs to text names
-   - Apply oversample multiplier if backup scrapers drop filters (see filter_gap_analyzer.py)
-   - Pass resolved industries to CodeCrafter/PeakyDev mappers
-
-4. [SKIP if olympus successful] Run code_crafter + peakydev in PARALLEL
-   - code_crafter for remaining count (with industry filter)
-   - peakydev for backup (only if remaining ≥ 1000, with industry filter)
-   - Use oversample counts, not raw target counts
-
-4.5 [SKIP if olympus successful] Post-scrape filter enforcement (if needed)
-   - PeakyDev now supports most filters natively (titles, seniority, location,
-     revenue, funding, functions, email_status) — post-filter rarely needed
-   - CodeCrafter: only drops email_status (minor — hardcoded to validated)
-   - If any scraper still drops enforceable filters:
-     py execution/post_scrape_filter.py --input LEADS --apollo-url "URL" --scraper SCRAPER
-   - Enforces: titles (substring match), seniority (inferred from title), location
-   - Use filtered output for merge step
-
-5. Merge & deduplicate (if multiple sources)
-
-6. Cross-campaign deduplication (if client has multiple campaigns)
-
-7. Industry relevance filter (if multiple scrapers used)
-   - Run AI-powered industry scoring against Apollo intent
-   - Removes leads from irrelevant industries (~20-65% reduction)
-   - See directives/lead_quality_filtering.md for details
-
-8. Lead quality filtering (see directives/lead_quality_filtering.md)
-   - Apply user's chosen filters (email, phone, title, industry, country)
-   - New flags: --require-country, --remove-phone-discrepancies
-
-9. [OPTIONAL] Email validation + enrichment
-   - Only if user requests it
-   - Scrapers already provide validated emails
-
-10. [OPTIONAL] AI enrichment (casual names + icebreakers)
-    - Only if user requests it
-    - Can be done later as separate step
-
-11. Upload to Google Sheets + update client.json
-
-Total time with Olympus success: ~6-7 minutes
-Total time with all scrapers + post-filter: ~16-22 minutes
-Total time with AI enrichment: ~30-45 minutes
-```
-
-## Fallback Workflow (When Olympus Fails)
+## Unified Workflow
 
 ```
-1. Olympus fails (cookie/authentication issue or offline)
+1. PRE-FLIGHT: Parse Apollo URL, show detailed per-scraper breakdown:
+   - Actual lead count that will be requested (after min/max clamping)
+   - Specific filter values sent to each scraper (with transforms noted)
+   - Which filters are dropped or post-filtered
+   - Cost and time estimates
+   - Notes (cookies needed, min leads, etc.)
 
-2. Extract filters from Apollo URL + run filter gap analysis
-   - Resolve industry hex IDs to text names (apollo_industry_resolver.py)
-   - Run: py execution/filter_gap_analyzer.py --apollo-url "URL"
-   - Show user which filters are dropped per scraper
-   - Calculate oversample multiplier per scraper
-   - If non-enforceable filters exist, warn user before spending money
+2. USER PICKS SCRAPERS (default: all)
+   - Agent presents one section per scraper with full detail, NOT a summary table
+   - User sees exactly what each scraper will do before choosing
 
-3. Test with code_crafter (25 leads) - validate 80% match
+3. RUN ALL SELECTED SCRAPERS IN PARALLEL
+   - Orchestrator: py execution/fast_lead_orchestrator.py --scrapers <choice>
+   - If Olympus cookie fails mid-run, other scrapers continue unaffected
+   - Cookie failure is logged as warning, not a blocker
 
-4. Run code_crafter + peakydev in PARALLEL:
-   - Launch code_crafter scraper (target count, with industry filter)
-   - Launch peakydev scraper (oversample count ≥ 1000, with industry filter)
-   - Wait for both to complete
+4. Merge & deduplicate (if multiple sources)
 
-5. Post-scrape filter enforcement (if needed)
-   - PeakyDev now handles most filters natively — post-filter rarely needed
-   - For any scraper with dropped enforceable filters:
-     py execution/post_scrape_filter.py --input LEADS --apollo-url "URL" --scraper SCRAPER
-   - Enforces titles, seniority, location on backup scraper output
-   - Use filtered output for merge step
+5. Cross-campaign deduplication (if client has existing campaigns)
 
-6. Merge & deduplicate all sources
+6. Industry relevance filter (if multi-scraper)
+   - AI-powered industry scoring against Apollo intent
+   - ~20-65% irrelevant lead reduction
 
-7. Cross-campaign deduplication (if needed)
+7. Quality filtering (present report to user, get approval)
+   - --require-email, --require-website, --require-country
+   - --remove-phone-discrepancies, --remove-foreign-tld
 
-8. Industry relevance filter
-   - Run industry_relevance_filter.py (no Olympus data available in fallback)
-   - Uses resolved industries from Apollo URL as sole intent source
+8. [OPTIONAL] AI enrichment (only if user requests)
 
-9. Lead quality filtering (--require-country, --remove-phone-discrepancies, etc.)
+9. Upload to Google Sheets + update client.json
 
-10. [OPTIONAL] Email validation + enrichment
-
-11. [OPTIONAL] AI enrichment
-
-12. Upload to Google Sheets
-
-Total time: ~16-22 minutes (without enrichment)
+Total time: parallel time of slowest selected scraper + ~2 min post-processing
 ```
 
 ## Cookie Validation Failure Protocol ⚠️
@@ -139,33 +70,15 @@ Total time: ~16-22 minutes (without enrichment)
 - Error message contains "Session Validation Failed", "Resurrect the run", or "cookie expired"
 - Very low lead count (< 1% of target, e.g., 3 leads when 2000 requested)
 
-**AI Agent Actions** (MANDATORY):
-1. **STOP the workflow immediately**
-2. **ALERT the user** with clear message:
-   ```
-   ⚠️  COOKIE VALIDATION FAILED
+**Behavior in parallel mode**:
+Since all scrapers run in parallel, Olympus cookie failure does NOT block other scrapers.
+The orchestrator logs a warning and continues collecting results from other scrapers.
 
-   The Apollo session cookie has expired.
-
-   Please:
-   1. Log into Apollo: https://app.apollo.io
-   2. Export cookies using EditThisCookie extension
-   3. Update APOLLO_COOKIE in .env file
-   4. Confirm when ready to continue
-   ```
-3. **ASK user for decision**:
-   - A) Wait while they refresh cookies (recommended)
-   - B) Continue with backup scrapers (lower quality)
-4. **WAIT for user confirmation** before proceeding
-5. **DO NOT** silently fall back to other scrapers
-6. **DO NOT** continue workflow without explicit user choice
-
-**Why this matters**:
-- Olympus provides the highest quality Apollo leads
-- Backup scrapers may have different data quality/coverage
-- User should explicitly choose degraded mode vs. waiting for cookies
-
-**Fast orchestrator now handles this automatically** (as of 2025-12-11)
+**AI Agent Actions**:
+1. After parallel run completes, check if Olympus failed with cookie error
+2. **ALERT the user**: "Olympus failed (cookie expired) — other scrapers succeeded normally"
+3. If user selected ONLY Olympus, the run fails entirely — alert user to refresh cookies
+4. If user selected multiple scrapers, the run completes with remaining scrapers' output
 
 ## Industry Hex ID Resolution Protocol ⚠️
 
@@ -201,43 +114,18 @@ via `learn_from_olympus()`. The pipeline should call this when unresolved IDs ex
 **Persistent storage**: Learned mappings are saved in `execution/apollo_industry_learned_mappings.json`
 and loaded automatically on every run. Each ID only needs to be mapped once, ever.
 
-## Decision Tree: When to Use Which Scrapers
+## Scraper Selection Guide
 
-```
-START: Run Olympus
-│
-├─ Cookie validation failed (exit code 2)
-│  └─ STOP → Alert user → Wait for cookie refresh OR user approval to continue
-│
-├─ Olympus succeeds with ≥ target leads
-│  └─ DONE - Skip other scrapers ✅ (Save 10-15 min)
-│
-├─ Olympus succeeds with < target leads
-│  └─ Calculate gap → Run code_crafter + peakydev in parallel
-│
-└─ Olympus fails (other reasons)
-   └─ Run code_crafter + peakydev in parallel (after validation)
-```
+User always picks scrapers before scraping starts. Here are common selection patterns:
 
-## Parallel Execution Pattern
-
-When multiple scrapers are needed, run them in parallel:
-
-```python
-# OLD WAY (Sequential - SLOW)
-olympus_leads = scrape_olympus()     # 6 min
-codecrafter_leads = scrape_codecrafter()  # 5 min
-peakydev_leads = scrape_peakydev()   # 4 min
-Total: 15 minutes
-
-# NEW WAY (Parallel - FAST)
-with ThreadPoolExecutor(max_workers=3):
-    future_olympus = executor.submit(scrape_olympus)
-    future_codecrafter = executor.submit(scrape_codecrafter)
-    future_peakydev = executor.submit(scrape_peakydev)
-    # All run simultaneously
-Total: 6 minutes (duration of slowest scraper)
-```
+| Scenario | Recommended Scrapers | Why |
+|----------|---------------------|-----|
+| Speed matters, < 1000 leads | codecrafter | Fastest, cheapest for small runs |
+| Maximum coverage | all three | Different data sources, best dedup |
+| Budget-conscious | peakydev | Cheapest per lead ($1.76/1k) |
+| Highest quality | olympus | Direct Apollo data, all fields |
+| Olympus cookies expired | codecrafter + peakydev | Skip Olympus entirely |
+| Need > 5000 leads | codecrafter + peakydev | Olympus has no cap but is slow; CC+PD faster |
 
 ## Optional Enrichment Strategy
 
@@ -275,23 +163,34 @@ AI enrichment is **expensive and slow**. Make it opt-in:
 
 ## Performance Benchmarks
 
-### Scraper Pricing (per 1k leads)
+### Scraper Pricing & Speed
 
-| Scraper | Cost/1k | Source | Notes |
-|---------|---------|--------|-------|
-| Olympus | $1.82 | Apify | Best quality, needs cookies |
-| PeakyDev | $1.76 | Apify | Cheapest, min 1000 leads |
-| CodeCrafter | $2.00 | RapidAPI | Most expensive per lead |
+| Scraper | Cost/1k | Speed | Source | Notes |
+|---------|---------|-------|--------|-------|
+| Olympus | $1.82 | ~26 leads/min | Apify | Needs cookies, slowest |
+| PeakyDev | $1.76 | ~286 leads/min | Apify | Cheapest, min 1000 leads |
+| CodeCrafter | $2.00 | ~345 leads/min | RapidAPI | Fastest |
+
+### Time estimates (from `scraper_registry.py`)
+
+| Scraper | 500 leads | 1,000 leads | 2,000 leads | 5,000 leads |
+|---------|-----------|-------------|-------------|-------------|
+| Olympus | ~19 min | ~38 min | ~77 min | ~192 min |
+| CodeCrafter | ~1 min | ~3 min | ~6 min | ~14 min |
+| PeakyDev | ~2 min | ~4 min | ~7 min | ~17 min |
+
+**Parallel time = slowest selected scraper.** If running all 3 for 1,000 leads, total is ~38 min (Olympus bottleneck).
 
 ### Workflow Cost Estimates
 
-| Workflow Variant | Lead Count | Time | Est. Cost |
-|-----------------|-----------|------|-----------|
-| Fast-track (Olympus only) | 1,000 | 6-7 min | ~$1.82 |
-| Standard (3 scrapers) | 1,500 | 15-20 min | ~$8-9 |
-| With email validation | 1,500 | 18-23 min | ~$9-10 |
-| With AI enrichment | 1,000 | 35-45 min | ~$6-8 |
-| Full pipeline | 1,500 | 50-60 min | ~$12-15 |
+| Scrapers Selected | Lead Count | Parallel Time | Est. Cost |
+|------------------|-----------|---------------|-----------|
+| CodeCrafter only | 1,000 | ~3 min | ~$2.00 |
+| PeakyDev only | 1,000 | ~4 min | ~$1.76 |
+| Olympus only | 1,000 | ~38 min | ~$1.82 |
+| CC + PeakyDev | 1,000 | ~4 min | ~$3.76 |
+| All 3 | 1,000 | ~38 min | ~$5.58 |
+| All 3 + AI enrichment | 1,000 | ~70 min | ~$8-10 |
 
 ## Apollo URL Construction
 
@@ -366,39 +265,29 @@ py execution/ai_casual_name_generator.py --input leads.json
 py execution/ai_icebreaker_generator.py --input casual_enriched_leads.json
 ```
 
-## Updated Workflow Checklist
+## Workflow Checklist
 
 **Pre-Flight**:
 - [ ] Get Apollo URL from user (or craft one — see `directives/apollo_url_crafter.md`)
 - [ ] Get target lead count
-- [ ] Ask: "Do you need AI enrichment?" (Default: No)
 - [ ] Check if client has existing campaigns (for cross-campaign dedup)
-- [ ] Parse Apollo URL → resolve industry hex IDs (`apollo_industry_resolver.py`)
-- [ ] Run filter gap analysis → show user what each scraper drops (`filter_gap_analyzer.py`)
-- [ ] If non-enforceable filters exist, ask: proceed or wait for Olympus?
-- [ ] Calculate oversample multipliers for backup scrapers
+- [ ] Parse Apollo URL → resolve industry hex IDs
+- [ ] Run pre-flight: show detailed per-scraper breakdown (filters, lead count, cost, time)
+- [ ] Present per-scraper sections to user (actual filter values, transforms, lead counts)
+- [ ] User picks which scrapers to run
 
 **Execution**:
-- [ ] Run Olympus scraper (always first)
-- [ ] Check if Olympus got enough leads (≥ target)
-  - If YES: Skip to deduplication
-  - If NO: Calculate gap and run additional scrapers in parallel (with resolved industries)
+- [ ] Run ALL selected scrapers in parallel (`--scrapers <choice>`)
+- [ ] Check for cookie failures (Olympus) — warn user, don't block
 - [ ] Merge & deduplicate (if multiple sources)
 - [ ] Cross-campaign deduplication (if client has multiple campaigns)
-- [ ] **Industry relevance filter** (if multi-scraper campaign):
-  - [ ] Run `industry_relevance_filter.py` with Apollo intent + Olympus data
-  - [ ] Review AI scores (relevant/maybe/irrelevant)
-  - [ ] Apply filter (default: keep relevant + maybe)
-- [ ] **Lead quality filtering** (see `directives/lead_quality_filtering.md`):
-  - [ ] Run quality analyzer to assess data
-  - [ ] Present filter options to user (email, phone, title, industry, country)
-  - [ ] Apply user's chosen filters (including `--require-country`, `--remove-phone-discrepancies`)
-- [ ] Skip email validation (scrapers provide validated emails)
+- [ ] Industry relevance filter (if multi-scraper)
+- [ ] Quality filtering (present report, get user approval)
 - [ ] Skip AI enrichment (unless user requested)
 - [ ] Upload to Google Sheets
 - [ ] Update client.json
 
-**Total Time**: 6-22 minutes (depending on scraper success)
+**Total Time**: parallel time of slowest scraper + ~2 min post-processing
 
 ## Data Quality Validation (Critical)
 
@@ -544,13 +433,14 @@ When field mappings break (e.g., Google Sheets shows missing company_name, compa
 
 ## Common Mistakes to Avoid
 
-1. ❌ **Running all scrapers when Olympus succeeds**
-   - Wastes 10-15 minutes and $2-4
-   - Olympus alone is often sufficient
+1. ❌ **Not showing scraper options before running**
+   - Always present detailed per-scraper breakdown (specific filters, lead counts, cost, time)
+   - Never use a generic "All OK" summary — show actual filter values and transforms
+   - User must explicitly choose scrapers
 
 2. ❌ **Running scrapers sequentially**
-   - Use parallel execution when multiple scrapers needed
-   - Save 50% of scraping time
+   - All selected scrapers run in parallel
+   - Total time = slowest scraper, not sum of all
 
 3. ❌ **Always doing AI enrichment**
    - Make it opt-in based on user needs
@@ -573,19 +463,6 @@ When field mappings break (e.g., Google Sheets shows missing company_name, compa
    - CodeCrafter/PeakyDev may return leads from 200+ industries
    - Without filtering, 20-65% of merged leads may be irrelevant
    - AI scoring costs <$0.01 and saves manual cleanup time
-
-## Migration from V4
-
-If following the old V4 workflow:
-
-**OLD**: 14 steps, ~45-60 min
-**NEW**: 3-8 steps, ~6-20 min
-
-**Changes**:
-- Steps 2-7: Now conditional (only if Olympus insufficient)
-- Steps 9-13: Now optional (only if user requests)
-- Step 15: New - Cross-campaign deduplication
-- Parallel execution for scrapers when needed
 
 ## From Lead Gen to Outreach
 

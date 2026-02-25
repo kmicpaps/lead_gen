@@ -47,7 +47,7 @@ Not every word works as a Google Maps search term. Some terms return 0 results b
 | `execution/scrape_gmaps_contact.py` | Apify scraper (`lukaskrivka/google-maps-with-contact-details`, ~$9/1K leads) |
 | `execution/lead_splitter.py` | Route leads into cold_calling / cold_email / no_contact |
 | `execution/website_evaluator.py` | PageSpeed Insights + tech stack detection |
-| `execution/gmaps_techstart_pipeline.py` | **Orchestrator** — runs all steps end-to-end |
+| `execution/gmaps_scored_pipeline.py` | **Orchestrator** — runs all steps end-to-end |
 
 ## Process Flow
 
@@ -56,7 +56,7 @@ Pipeline scrapes 10 leads per term to validate they return results. Aborts if an
 
 ### Step 1: Scrape (Apify)
 ```
-python execution/gmaps_techstart_pipeline.py \
+python execution/gmaps_scored_pipeline.py \
   --niches "juristi:juristi" "frizieris:frizieris" "būvnieki:būvniecība" \
   --limit 500 --evaluate-websites --workers 3 \
   --sheet-url "SHEET_URL"
@@ -130,7 +130,7 @@ The scraper applies domain-based email filtering:
 ### Skip-Scrape Mode
 To re-run evaluation + export on existing data:
 ```
-python execution/gmaps_techstart_pipeline.py \
+python execution/gmaps_scored_pipeline.py \
   --niches "juristi:juristi" \
   --skip-scrape .tmp/techstart_pipeline/scraped_YYYYMMDD_HHMMSS.json \
   --evaluate-websites --workers 3 \

@@ -7,13 +7,12 @@ human-readable industry names. These IDs appear in Apollo search URLs as
 `organizationIndustryTagIds[]` parameters.
 
 Strategy:
-1. Static mapping: 25 confirmed hex ID -> text name pairs
-2. Learned mappings: Persistent JSON file that grows as new IDs are discovered
-3. Dynamic learning: Mine Olympus scraper output for industry names
-4. Cache: Save/load campaign-specific industry intent
+1. Learned mappings: Persistent JSON file (146+ verified mappings)
+2. Dynamic learning: Mine Olympus scraper output for industry names
+3. Cache: Save/load campaign-specific industry intent
 
-The static map covers ~15% of Apollo's full taxonomy. When new IDs are
-discovered, use --add to save them permanently to the learned mappings file.
+When new IDs are discovered, use --add to save them permanently to the
+learned mappings file.
 
 Usage:
     # As module
@@ -517,7 +516,7 @@ def main():
         return 0
 
     if args.list_known:
-        print(f"Known mappings: {len(APOLLO_INDUSTRY_MAP)} (static: 25, learned: {_LEARNED_COUNT})")
+        print(f"Known mappings: {len(APOLLO_INDUSTRY_MAP)} (all learned from {_LEARNED_MAPPINGS_FILE})")
         for hid, name in sorted(APOLLO_INDUSTRY_MAP.items(), key=lambda x: x[1]):
             print(f"  {hid} -> {name}")
         print(f"\nLinkedIn industries: {len(LINKEDIN_INDUSTRIES)}")

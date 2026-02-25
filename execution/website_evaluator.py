@@ -433,7 +433,7 @@ def main():
         # Batch mode
         leads = load_json(args.input)
 
-        enriched = evaluate_websites_batch(leads, api_key, args.workers)
+        enriched = evaluate_websites_batch(leads, api_key, max_workers=args.workers)
 
         output_path = args.output or args.input.replace(".json", "_evaluated.json")
         save_json(enriched, output_path)

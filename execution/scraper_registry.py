@@ -73,11 +73,17 @@ SCRAPER_REGISTRY = {
         "preflight_warnings": [],
 
         # Orchestrator behavior
-        "role": "primary",       # "primary" runs first solo, "backup" runs in parallel
-        "timeout": 600,
+        "timeout": 2700,  # 45 min — Olympus is slow (~26 leads/min)
 
         # Pricing (USD per 1k leads, based on observed Apify costs)
         "pricing": {"cost_per_1k": 1.82},
+
+        # Time benchmarks (observed real-world performance)
+        "time_benchmark": {
+            "observed_leads": 600,
+            "observed_minutes": 23,
+            "leads_per_min": 26,
+        },
     },
 
     "codecrafter": {
@@ -112,11 +118,17 @@ SCRAPER_REGISTRY = {
         ],
         "preflight_warnings": [],
 
-        "role": "backup",
         "timeout": 600,
 
         # Pricing (USD per 1k leads, based on observed RapidAPI costs)
         "pricing": {"cost_per_1k": 2.00},
+
+        # Time benchmarks (observed real-world performance)
+        "time_benchmark": {
+            "observed_leads": 10000,
+            "observed_minutes": 29,
+            "leads_per_min": 345,
+        },
     },
 
     "peakydev": {
@@ -155,11 +167,17 @@ SCRAPER_REGISTRY = {
         ],
         "preflight_warnings": [],
 
-        "role": "backup",
         "timeout": 600,
 
         # Pricing (USD per 1k leads, based on observed Apify costs)
         "pricing": {"cost_per_1k": 1.76},
+
+        # Time benchmarks (observed real-world performance)
+        "time_benchmark": {
+            "observed_leads": 4000,
+            "observed_minutes": 14,
+            "leads_per_min": 286,
+        },
     },
 }
 
@@ -177,17 +195,8 @@ SCRAPER_SUPPORT = {
 # Valid scraper names (for --scrapers CLI validation)
 VALID_SCRAPER_NAMES = set(SCRAPER_REGISTRY.keys())
 
-# Primary scraper(s) — run first, before backup scrapers
-PRIMARY_SCRAPERS = [
-    name for name, cfg in SCRAPER_REGISTRY.items()
-    if cfg["role"] == "primary"
-]
-
-# Backup scrapers — run in parallel after primary
-BACKUP_SCRAPERS = [
-    name for name, cfg in SCRAPER_REGISTRY.items()
-    if cfg["role"] == "backup"
-]
+# All scraper names in registry order
+ALL_SCRAPERS = list(SCRAPER_REGISTRY.keys())
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +242,21 @@ def build_scraper_command(name, apollo_url, max_leads, country=None):
         cmd += " " + config["country_arg"].format(country=country)
 
     return cmd
+
+
+def estimate_time(name, target_leads):
+    """Estimate scrape time in minutes based on observed benchmarks."""
+    config = get_scraper(name)
+    benchmark = config.get("time_benchmark", {})
+    leads_per_min = benchmark.get("leads_per_min", 100)
+    return max(1, round(target_leads / leads_per_min))
+
+
+def estimate_cost(name, target_leads):
+    """Estimate cost in USD for target_leads."""
+    config = get_scraper(name)
+    cost_per_1k = config.get("pricing", {}).get("cost_per_1k", 0)
+    return cost_per_1k * target_leads / 1000
 
 
 def get_default_target(name, remaining, max_leads_mode):

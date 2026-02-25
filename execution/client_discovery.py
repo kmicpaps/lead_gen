@@ -14,7 +14,7 @@ import json
 import argparse
 import requests
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse, urljoin
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -80,7 +80,7 @@ def extract_text_content(soup, max_chars=3000):
                 text = el.get_text(strip=True, separator=' ')
                 if text and len(text) > 20:
                     text_parts.append(text)
-        except:
+        except Exception:
             continue
 
     # Combine and clean
@@ -354,12 +354,12 @@ def create_client_json(analysis, url, email=None):
         },
         "discovery": {
             "source": "ai_analysis",
-            "analyzed_at": datetime.utcnow().isoformat() + 'Z',
+            "analyzed_at": datetime.now(timezone.utc).isoformat() + 'Z',
             "confidence": analysis.get('confidence_score', 0.0),
             "notes": analysis.get('notes', '')
         },
-        "created_at": datetime.utcnow().isoformat() + 'Z',
-        "updated_at": datetime.utcnow().isoformat() + 'Z',
+        "created_at": datetime.now(timezone.utc).isoformat() + 'Z',
+        "updated_at": datetime.now(timezone.utc).isoformat() + 'Z',
         "campaigns": []
     }
 

@@ -20,6 +20,10 @@ Help users go from a vague lead description ("I need construction company owners
 7. Agent runs gap analysis + scrapers as normal (see lead_generation_v5_optimized.md)
 ```
 
+## IMPORTANT: English-Only Titles
+
+**Always use English titles only.** Never include localized/translated job titles (e.g., "Amministratore Delegato", "Geschaeftsfuehrer", "Directeur Général"). Backup scrapers (CodeCrafter, PeakyDev) pass titles to their APIs as filter strings — non-English titles may not be understood, resulting in missed leads. Apollo's own search handles English titles fine even for non-English-speaking countries, since most LinkedIn profiles use English job titles. For niche local-language terms, use the `keywords` field instead (keywords filter on company descriptions and work across all scrapers).
+
 ## Step 1: Extract Filters from Description
 
 When the user describes what they want, extract these parameters:
@@ -59,6 +63,13 @@ When the user describes what they want, extract these parameters:
 | Medium (50-500) | `51,200`, `201,500` |
 | Large (500+) | `501,1000`, `1001,5000`, `5001,10000` |
 | Enterprise (10k+) | `10001+` |
+
+**Important — Apollo uses broad ranges** (e.g., `11,50` and `51,200`) that don't map 1:1 to scraper APIs. Each scraper has its own granularity:
+- **CodeCrafter** accepts: `1-10`, `11-20`, `21-50`, `51-100`, `101-200`, `201-500`, `501-1000`, `1001-2000`, `2001-5000`, `5001-10000`, `10001-20000`, `20001-50000`, `50000+`. Apollo broad ranges must be **expanded** (e.g., `51,200` → `51-100` + `101-200`).
+- **PeakyDev** accepts: `0 - 1`, `2 - 10`, `11 - 50`, `51 - 200`, `201 - 500`, `501 - 1000`, `1001 - 5000`, `5001 - 10000`, `10000+`. Apollo granular ranges must be **collapsed** (e.g., `51,100` + `101,200` both → `51 - 200`).
+- **Olympus** passes the Apollo URL directly — no mapping needed.
+
+Scraper scripts handle this mapping internally. If you add a new scraper, ensure its size map covers ALL Apollo range variants (both granular and broad).
 
 ## Step 2: Industry Selection
 
@@ -147,7 +158,7 @@ When the user pastes back a refined URL:
 ### Marketing agency owners in DACH
 ```json
 {
-  "titles": ["CEO", "Founder", "Owner", "Managing Director", "Geschaeftsfuehrer"],
+  "titles": ["CEO", "Founder", "Owner", "Managing Director"],
   "seniority": ["owner", "founder", "c_suite"],
   "industries": ["Marketing & Advertising", "Online Media"],
   "org_locations": ["Germany", "Austria", "Switzerland"],

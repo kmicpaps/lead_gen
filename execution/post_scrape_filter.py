@@ -95,7 +95,8 @@ def filter_by_titles(leads: list, required_titles: list) -> list:
     for lead in leads:
         title = (lead.get("title") or "").lower()
         if not title:
-            continue  # No title = can't verify, drop
+            kept.append(lead)  # No title = can't verify, keep
+            continue
         if any(req in title for req in required_lower):
             kept.append(lead)
     return kept

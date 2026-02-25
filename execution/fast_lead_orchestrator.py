@@ -1,24 +1,24 @@
 # [ORCHESTRATOR] — pipeline controller, calls other scripts via subprocess
 """
-Fast Lead Generation Orchestrator (V7)
+Fast Lead Generation Orchestrator (V8 — Parallel-First)
 
 Automated pipeline from Apollo URL to clean Google Sheet with quality gates.
+User picks scrapers upfront; all selected scrapers run in parallel.
 
 Steps:
-0. Pre-flight: parse Apollo URL, show filter mapping per scraper
-1. Olympus scraper (skip with --skip-olympus or --scrapers)
-2. Backup scrapers in parallel (user picks via --scrapers)
-3. Merge & internal deduplication
-4. Cross-campaign deduplication
-4.5. Reference CSV deduplication (if --reference-csv)
-5. Country verification (if --country, skip with --skip-country-verify)
-5.5. Auto-derived quality filtering (skip with --skip-quality-filter)
-6. Optional AI enrichment (if --enrich)
-7. Google Sheets export (create/append/replace)
-8. Update client.json
+0. Pre-flight: parse Apollo URL, show filter/cost/time per scraper
+1. Run ALL selected scrapers in parallel
+2. Merge & internal deduplication
+3. Cross-campaign deduplication
+3.5. Reference CSV deduplication (if --reference-csv)
+4. Country verification (if --country, skip with --skip-country-verify)
+4.5. Auto-derived quality filtering (skip with --skip-quality-filter)
+5. Optional AI enrichment (if --enrich)
+6. Google Sheets export (create/append/replace)
+7. Update client.json
 
 Usage:
-    # Pre-flight only — see filter mappings without scraping
+    # Pre-flight only — see filter mappings + cost + time without scraping
     py execution/fast_lead_orchestrator.py \
       --client-id example_client \
       --campaign-name "Latvia Industries" \
@@ -27,25 +27,22 @@ Usage:
       --country LV \
       --pre-flight-only
 
-    # Pick specific scrapers (CodeCrafter only)
+    # All scrapers (default)
     py execution/fast_lead_orchestrator.py \
       --client-id example_client \
       --campaign-name "Latvia Industries" \
       --apollo-url "https://app.apollo.io/#/people?..." \
       --target-leads 5000 \
-      --country LV \
-      --scrapers codecrafter \
-      --max-leads-mode maximum
+      --country LV
 
-    # Both backup scrapers
+    # Pick specific scrapers
     py execution/fast_lead_orchestrator.py \
       --client-id example_client \
       --campaign-name "Latvia Industries" \
       --apollo-url "https://app.apollo.io/#/people?..." \
       --target-leads 5000 \
       --country LV \
-      --scrapers codecrafter,peakydev \
-      --max-leads-mode maximum
+      --scrapers codecrafter,peakydev
 
     # With reference CSV dedup and existing sheet update
     py execution/fast_lead_orchestrator.py \
@@ -66,22 +63,133 @@ import argparse
 import subprocess
 import time
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Sibling imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from scraper_registry import (
-    SCRAPER_REGISTRY, VALID_SCRAPER_NAMES, PRIMARY_SCRAPERS,
-    BACKUP_SCRAPERS, build_scraper_command, get_default_target
+    SCRAPER_REGISTRY, VALID_SCRAPER_NAMES, ALL_SCRAPERS,
+    build_scraper_command, get_default_target, estimate_time, estimate_cost
 )
 from utils import load_json, save_json, load_leads
 
-def run_command(cmd, description, timeout=600):
-    """Run a shell command and return success status, exit code, and output."""
+
+def try_recover_apify_run(scraper_name, config, campaign_folder):
+    """
+    Attempt to recover results from an Apify run that completed despite local timeout.
+
+    Each scraper saves its Apify run ID to .active_run.json immediately after starting.
+    If the local subprocess is killed (timeout), the Apify run continues remotely.
+    This function checks the run status and downloads results if available.
+
+    Returns:
+        (scraper_name, lead_file_path, lead_count) on success, or None on failure.
+    """
+    run_id_file = Path(config["output_dir"]) / '.active_run.json'
+    if not run_id_file.exists():
+        return None
+
+    try:
+        run_info = load_json(str(run_id_file))
+        run_id = run_info['run_id']
+        actor_name = run_info.get('actor', 'unknown')
+        print(f"\n[RECOVERY] {scraper_name}: Found saved run ID {run_id} ({actor_name})")
+        print(f"  Checking Apify run status...")
+
+        from apify_client import ApifyClient
+        from dotenv import load_dotenv
+        load_dotenv()
+        apify_key = os.getenv('APIFY_API_TOKEN') or os.getenv('APIFY_TOKEN')
+        if not apify_key:
+            print(f"  [RECOVERY FAILED] No Apify API token found")
+            return None
+
+        client = ApifyClient(apify_key)
+        run = client.run(run_id).get()
+
+        if not run:
+            print(f"  [RECOVERY FAILED] Run {run_id} not found")
+            return None
+
+        status = run.get('status', 'UNKNOWN')
+        print(f"  Run status: {status}")
+
+        if status == 'RUNNING':
+            print(f"  Run is still in progress — waiting for completion...")
+            run = client.run(run_id).wait_for_finish()
+            status = run.get('status', 'UNKNOWN')
+            print(f"  Final status: {status}")
+
+        if status != 'SUCCEEDED':
+            print(f"  [RECOVERY FAILED] Run ended with status: {status}")
+            run_id_file.unlink(missing_ok=True)
+            return None
+
+        # Download results
+        print(f"  Downloading results from recovered run...")
+        dataset_id = run.get('defaultDatasetId')
+        if not dataset_id:
+            print(f"  [RECOVERY FAILED] No dataset ID in run")
+            return None
+
+        dataset_items = list(client.dataset(dataset_id).iterate_items())
+        if not dataset_items:
+            print(f"  [RECOVERY FAILED] Dataset is empty")
+            return None
+
+        lead_count = len(dataset_items)
+        print(f"  Downloaded {lead_count} leads from recovered run")
+
+        # Normalize and save (import the right normalizer)
+        if scraper_name == 'olympus':
+            from scraper_olympus_b2b_finder import normalize_lead_to_schema
+        elif scraper_name == 'codecrafter':
+            from scraper_codecrafter import normalize_lead_to_schema
+        elif scraper_name == 'peakydev':
+            from scraper_peakydev import normalize_lead_to_schema
+        else:
+            print(f"  [RECOVERY FAILED] Unknown scraper: {scraper_name}")
+            return None
+
+        normalized = [normalize_lead_to_schema(item) for item in dataset_items]
+
+        # Save to output dir
+        output_dir = Path(config["output_dir"])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{config['output_prefix']}_{timestamp}_{lead_count}leads.json"
+        output_path = output_dir / filename
+        save_json(normalized, str(output_path))
+
+        # Copy to campaign folder
+        import shutil as _shutil
+        _shutil.copy2(output_path, campaign_folder / config["campaign_filename"])
+
+        # Clean up
+        run_id_file.unlink(missing_ok=True)
+
+        print(f"  [RECOVERY SUCCESS] {lead_count} leads saved to {output_path}")
+        return (scraper_name, output_path, lead_count)
+
+    except Exception as e:
+        print(f"  [RECOVERY FAILED] Error: {e}")
+        return None
+
+
+def run_command(cmd, description, timeout=600, tag=None):
+    """Run a shell command and return success status, exit code, and output.
+
+    Args:
+        tag: Optional prefix for log lines (e.g. scraper name). When set,
+             all print output is prefixed with [TAG] so parallel output
+             can be attributed to the right scraper.
+    """
+    prefix = f"[{tag}] " if tag else ""
+
     print(f"\n{'='*70}")
-    print(f"[STEP] {description}")
+    print(f"{prefix}[STEP] {description}")
     print(f"{'='*70}")
 
     start_time = time.time()
@@ -98,25 +206,34 @@ def run_command(cmd, description, timeout=600):
         elapsed = time.time() - start_time
 
         if result.returncode == 0:
-            print(f"[SUCCESS] Completed in {elapsed:.1f}s")
+            print(f"{prefix}[SUCCESS] Completed in {elapsed:.1f}s")
             if result.stdout:
-                print(result.stdout)
+                # Prefix each line so parallel output stays attributable
+                if tag:
+                    for line in result.stdout.rstrip('\n').split('\n'):
+                        print(f"{prefix}{line}")
+                else:
+                    print(result.stdout)
             return True, result.returncode, result.stdout
         else:
-            print(f"[FAILED] Exit code {result.returncode}")
+            print(f"{prefix}[FAILED] Exit code {result.returncode}")
             if result.stderr:
-                print(result.stderr)
+                if tag:
+                    for line in result.stderr.rstrip('\n').split('\n'):
+                        print(f"{prefix}{line}")
+                else:
+                    print(result.stderr)
             # Combine stdout and stderr for cookie detection
             combined_output = result.stdout + "\n" + result.stderr
             return False, result.returncode, combined_output
 
     except subprocess.TimeoutExpired:
         elapsed = time.time() - start_time
-        print(f"[TIMEOUT] Command exceeded {timeout}s timeout")
+        print(f"{prefix}[TIMEOUT] Command exceeded {timeout}s timeout")
         return False, -1, "Timeout"
     except Exception as e:
         elapsed = time.time() - start_time
-        print(f"[ERROR] {str(e)}")
+        print(f"{prefix}[ERROR] {str(e)}")
         return False, -1, str(e)
 
 
@@ -165,7 +282,10 @@ def run_scraper_parallel(scrapers):
         futures = {}
 
         for scraper_name, cmd, timeout in scrapers:
-            future = executor.submit(run_command, cmd, f"Running {scraper_name}", timeout)
+            future = executor.submit(
+                run_command, cmd, f"Running {scraper_name}", timeout,
+                tag=scraper_name.upper()
+            )
             futures[future] = scraper_name
 
         for future in as_completed(futures):
@@ -297,23 +417,32 @@ def pre_flight(apollo_url, country_code, selected_scrapers=None, target_leads=No
     if country_code:
         print(f"    Remove: foreign TLDs, phone/country discrepancies")
 
-    # --- Cost estimates ---
+    # --- Cost & time estimates ---
     print(f"\n  {'-'*60}")
-    print(f"  ESTIMATED COSTS:")
+    print(f"  ESTIMATED COST & TIME:")
     total_cost = 0.0
+    max_time = 0
+    leads_for_estimate = target_leads if target_leads else 1000
     for name, config in SCRAPER_REGISTRY.items():
         if name not in scrapers_to_show:
             continue
-        pricing = config.get("pricing", {})
-        cost_per_1k = pricing.get("cost_per_1k", 0)
         label = config["display_name"]
-        leads_for_estimate = target_leads if target_leads else 1000
-        est = cost_per_1k * leads_for_estimate / 1000
-        total_cost += est
-        print(f"    {label:15s} ${cost_per_1k:.2f}/1k leads   (~${est:.2f} for {leads_for_estimate:,} leads)")
+        est_cost = estimate_cost(name, leads_for_estimate)
+        est_mins = estimate_time(name, leads_for_estimate)
+        total_cost += est_cost
+        max_time = max(max_time, est_mins)
+        notes = []
+        if config["needs_cookies"]:
+            notes.append("needs cookies")
+        min_leads = config.get("min_leads")
+        if min_leads and leads_for_estimate < min_leads:
+            notes.append(f"min {min_leads} leads")
+        notes_str = f"  ({', '.join(notes)})" if notes else ""
+        print(f"    {label:15s} ~${est_cost:.2f}   ~{est_mins} min{notes_str}")
     if target_leads:
-        print(f"    {'─'*45}")
-        print(f"    {'Total estimate':15s} ~${total_cost:.2f} (before dedup overlap)")
+        print(f"    {'-'*45}")
+        print(f"    {'Total cost':15s} ~${total_cost:.2f} (before dedup overlap)")
+        print(f"    {'Parallel time':15s} ~{max_time} min (= slowest scraper)")
     print(f"{'='*70}")
 
     return apollo_filters
@@ -325,13 +454,10 @@ def main():
     parser.add_argument('--campaign-name', required=True, help='Campaign name')
     parser.add_argument('--apollo-url', required=True, help='Apollo search URL')
     parser.add_argument('--target-leads', type=int, required=True, help='Target number of leads')
-    parser.add_argument('--country', default='NZ', help='Country code for Olympus scraper')
+    parser.add_argument('--country', default=None, help='Country code for verification (e.g. LT, LV, IT). If omitted, country verification is skipped.')
     parser.add_argument('--enrich', action='store_true', help='Enable AI enrichment (slower)')
-    parser.add_argument('--force-multi-source', action='store_true', help='Force running all scrapers')
-    parser.add_argument('--skip-olympus', action='store_true',
-                        help='Skip Olympus, go straight to backup scrapers (CC + PeakyDev)')
     parser.add_argument('--scrapers', type=str,
-                        help='Comma-separated scrapers to use: olympus,codecrafter,peakydev (overrides auto-selection)')
+                        help='Comma-separated scrapers to run: olympus,codecrafter,peakydev (default: all)')
     parser.add_argument('--pre-flight-only', action='store_true',
                         help='Show filter mapping and exit without scraping')
     parser.add_argument('--reference-csv', type=str,
@@ -359,8 +485,7 @@ def main():
     print(f"\n{'='*70}")
     print(f"FAST LEAD GENERATION ORCHESTRATOR")
     print(f"{'='*70}")
-    # Parse --scrapers flag into a set
-    selected_scrapers = None  # None = auto-select
+    # Parse --scrapers flag into a set (default: all scrapers)
     if args.scrapers:
         selected_scrapers = {s.strip().lower() for s in args.scrapers.split(',')}
         invalid = selected_scrapers - VALID_SCRAPER_NAMES
@@ -368,15 +493,14 @@ def main():
             print(f"ERROR: Unknown scraper(s): {', '.join(invalid)}")
             print(f"Valid scrapers: {', '.join(sorted(VALID_SCRAPER_NAMES))}")
             return 1
-        # --scrapers overrides --skip-olympus if no primary scrapers selected
-        if not selected_scrapers & set(PRIMARY_SCRAPERS):
-            args.skip_olympus = True
+    else:
+        selected_scrapers = set(ALL_SCRAPERS)
 
     print(f"Client: {args.client_id}")
     print(f"Campaign: {args.campaign_name}")
     print(f"Target leads: {args.target_leads}")
     print(f"Country: {args.country}")
-    print(f"Scrapers: {', '.join(sorted(selected_scrapers)) if selected_scrapers else 'auto'}")
+    print(f"Scrapers: {', '.join(sorted(selected_scrapers))}")
     print(f"Max leads mode: {args.max_leads_mode}")
     print(f"Country verification: {'Disabled' if args.skip_country_verify else 'Enabled'}")
     print(f"Quality filtering: {'Disabled' if args.skip_quality_filter else 'Auto-derived'}")
@@ -398,124 +522,83 @@ def main():
 
     workflow_start = time.time()
 
-    # STEP 1: Run primary scraper(s)
+    # STEP 1: Run ALL selected scrapers in parallel
     lead_sources = []
-    primary_lead_count = 0
 
-    # Determine which primary scrapers to run
-    if selected_scrapers:
-        run_primary = [s for s in PRIMARY_SCRAPERS if s in selected_scrapers]
-    else:
-        run_primary = PRIMARY_SCRAPERS[:]
-
-    if args.skip_olympus:
-        run_primary = []
-        print(f"\n{'='*70}")
-        print(f"[SKIP-PRIMARY] Going straight to backup scrapers")
-        print(f"{'='*70}")
-
-    for name in run_primary:
+    # Build commands for all selected scrapers
+    scrapers_to_run = []
+    for name in ALL_SCRAPERS:
+        if name not in selected_scrapers:
+            continue
         config = SCRAPER_REGISTRY[name]
-        cmd = build_scraper_command(name, args.apollo_url, args.target_leads, args.country)
+        target = get_default_target(name, args.target_leads, args.max_leads_mode)
+        cmd = build_scraper_command(name, args.apollo_url, target, args.country)
+        est_mins = estimate_time(name, target)
+        print(f"  {config['display_name']:15s} requesting {target:,} leads (~{est_mins} min)")
+        scrapers_to_run.append((name, cmd, config["timeout"]))
+
+    print(f"\n  Monitor progress at: https://console.apify.com/actors/runs")
+
+    if len(scrapers_to_run) == 1:
+        # Single scraper — run directly (no parallel overhead)
+        name, cmd, timeout = scrapers_to_run[0]
+        config = SCRAPER_REGISTRY[name]
         success, exit_code, output = run_command(
-            cmd, f"Step 1: {config['display_name']} scraper (primary)", timeout=config["timeout"]
+            cmd, f"Step 1: {config['display_name']} scraper", timeout=timeout
         )
 
-        # Cookie failure handling (for scrapers that need cookies)
+        # Cookie failure handling
         if config["needs_cookies"] and (
             exit_code == config.get("cookie_exit_code")
             or 'COOKIE VALIDATION FAILED' in output
         ):
-            print(f"\n{'='*70}")
-            print(f"[CRITICAL] {config['display_name']}: Cookie validation failed")
-            print(f"{'='*70}")
-            print("")
-            print("Apollo session cookie has expired.")
-            print("")
-            print("ACTION REQUIRED:")
-            print("1. Log into Apollo: https://app.apollo.io")
-            print("2. Export cookies using EditThisCookie extension")
-            print("3. Update APOLLO_COOKIE in .env file")
-            print("4. Run the orchestrator again")
-            print("")
-            print(f"{'='*70}")
-            print("")
-            backup_names = ', '.join(BACKUP_SCRAPERS)
-            user_choice = input(f"Continue with backup scrapers ({backup_names})? [y/N]: ").strip().lower()
-
-            if user_choice != 'y':
-                print("\n[STOPPED] Exiting to allow cookie refresh.")
-                return 1
-
-            print(f"\n[CONTINUING] Using backup scrapers without {config['display_name']}...")
-            success = False
+            print(f"\n[CRITICAL] {config['display_name']}: Cookie validation failed")
+            print(f"  Apollo session cookie has expired.")
+            print(f"  1. Log into Apollo: https://app.apollo.io")
+            print(f"  2. Export cookies using EditThisCookie extension")
+            print(f"  3. Update APOLLO_COOKIE in .env file")
+            return 1
 
         lead_count = get_lead_count_from_output(output) if success else 0
         lead_file = find_latest_lead_file(config["output_dir"], config["output_prefix"])
-
         if lead_file and success:
             shutil.copy2(lead_file, campaign_folder / config["campaign_filename"])
             lead_sources.append((name, lead_file, lead_count))
-            primary_lead_count += lead_count
-
-    # Decision: Do we need backup scrapers?
-    has_explicit_backups = selected_scrapers and (selected_scrapers & set(BACKUP_SCRAPERS))
-    need_more = has_explicit_backups or args.force_multi_source or (primary_lead_count < args.target_leads)
-
-    if not need_more and primary_lead_count > 0:
-        print(f"\n{'='*70}")
-        print(f"[FAST-TRACK] Primary got {primary_lead_count} leads (target: {args.target_leads})")
-        print(f"[FAST-TRACK] Skipping additional scrapers (Saved ~10 minutes)")
-        print(f"{'='*70}")
     else:
-        # STEP 2: Run backup scrapers in parallel
-        remaining = args.target_leads - primary_lead_count
-        print(f"\n[DECISION] Need {remaining} more leads - running backup scrapers")
-
-        # Determine which backup scrapers to run
-        if selected_scrapers:
-            backups_to_run = [s for s in BACKUP_SCRAPERS if s in selected_scrapers]
-        else:
-            # Auto-select: skip scrapers whose min_leads exceeds remaining (unless maximum mode)
-            backups_to_run = []
-            for name in BACKUP_SCRAPERS:
-                cfg = SCRAPER_REGISTRY[name]
-                min_leads = cfg.get("min_leads") or 0
-                if min_leads > remaining and args.max_leads_mode != 'maximum':
-                    continue
-                backups_to_run.append(name)
-
-        # Build commands using registry
-        scrapers_to_run = []
-        for name in backups_to_run:
-            config = SCRAPER_REGISTRY[name]
-            target = get_default_target(name, remaining, args.max_leads_mode)
-            cmd = build_scraper_command(name, args.apollo_url, target, args.country)
-            scrapers_to_run.append((name, cmd, config["timeout"]))
-
-        if args.max_leads_mode == 'maximum':
-            targets_str = ', '.join(
-                f"{SCRAPER_REGISTRY[n]['display_name']}: {get_default_target(n, remaining, 'maximum')}"
-                for n in backups_to_run
-            )
-            print(f"[MAX-MODE] Requesting maximum from each scraper ({targets_str})")
-
-        # Run scrapers in parallel
+        # Multiple scrapers — run all in parallel
         scraper_results = run_scraper_parallel(scrapers_to_run)
 
-        # Collect results — registry-driven loop
-        for name in backups_to_run:
+        # Collect results + handle cookie failures
+        for name in ALL_SCRAPERS:
+            if name not in selected_scrapers:
+                continue
             config = SCRAPER_REGISTRY[name]
-            lead_file = find_latest_lead_file(config["output_dir"], config["output_prefix"])
-            if lead_file and scraper_results.get(name, {}).get('success'):
-                shutil.copy2(lead_file, campaign_folder / config["campaign_filename"])
-                lead_sources.append((name, lead_file, scraper_results[name]['lead_count']))
+            result = scraper_results.get(name, {})
 
-    # STEP 3: Merge & deduplicate (if multiple sources)
+            # Cookie failure warning (doesn't block other scrapers since they ran in parallel)
+            if config["needs_cookies"] and not result.get('success'):
+                output = result.get('output', '')
+                if 'COOKIE VALIDATION FAILED' in output or 'cookie expired' in output.lower():
+                    print(f"\n[WARNING] {config['display_name']}: Cookie validation failed")
+                    print(f"  Apollo session cookie has expired — {config['display_name']} returned 0 leads.")
+                    print(f"  Other scrapers continued normally.")
+
+            lead_file = find_latest_lead_file(config["output_dir"], config["output_prefix"])
+            if lead_file and result.get('success'):
+                shutil.copy2(lead_file, campaign_folder / config["campaign_filename"])
+                lead_sources.append((name, lead_file, result['lead_count']))
+            elif not result.get('success'):
+                # Attempt recovery: check if Apify run completed despite local timeout
+                recovered = try_recover_apify_run(name, config, campaign_folder)
+                if recovered:
+                    rec_name, rec_file, rec_count = recovered
+                    lead_sources.append((rec_name, rec_file, rec_count))
+
+    # STEP 2: Merge & deduplicate (if multiple sources)
     if len(lead_sources) > 1:
         source_args = ' '.join([f'--source-file "{path}"' for name, path, count in lead_sources])
         merge_cmd = f'py execution/leads_deduplicator.py {source_args} --output-dir "{campaign_folder}" --output-prefix "raw_leads"'
-        merge_success, _, _ = run_command(merge_cmd, "Step 3: Merge & deduplicate sources", timeout=300)
+        merge_success, _, _ = run_command(merge_cmd, "Step 2: Merge & deduplicate sources", timeout=300)
 
         if merge_success:
             raw_file = find_latest_lead_file(campaign_folder, 'raw_leads_')
@@ -533,18 +616,21 @@ def main():
         print("[ERROR] No leads available - exiting")
         return 1
 
-    # STEP 4: Cross-campaign deduplication
-    dedup_cmd = f'py execution/cross_campaign_deduplicator.py --client-id {args.client_id}'
-    _, _, _ = run_command(dedup_cmd, "Step 4: Cross-campaign deduplication", timeout=300)
+    # STEP 3: Cross-campaign deduplication
+    dedup_cmd = f'py execution/cross_campaign_deduplicator.py --client-id "{args.client_id}"'
+    _, _, _ = run_command(dedup_cmd, "Step 3: Cross-campaign deduplication", timeout=300)
 
     # Refresh raw file path after deduplication
     raw_file = find_latest_lead_file(campaign_folder, 'raw_leads_')
+    if not raw_file:
+        print("[ERROR] raw_leads file not found after cross-campaign dedup - exiting")
+        return 1
 
-    # STEP 4.5: Reference CSV deduplication (if --reference-csv provided)
+    # STEP 3.5: Reference CSV deduplication (if --reference-csv provided)
     if args.reference_csv and raw_file:
         import csv
         print(f"\n{'='*70}")
-        print(f"[STEP] Step 4.5: Reference CSV deduplication")
+        print(f"[STEP] Step 3.5: Reference CSV deduplication")
         print(f"{'='*70}")
         try:
             # Load reference emails
@@ -573,10 +659,10 @@ def main():
             print(f"[WARNING] Reference CSV dedup failed: {e}")
             print(f"[CONTINUING] Proceeding without reference dedup")
 
-    # STEP 5: Country verification (if --country and not --skip-country-verify)
+    # STEP 4: Country verification (if --country and not --skip-country-verify)
     if not args.skip_country_verify and args.country and raw_file:
         verify_cmd = f'py execution/verify_country.py --input "{raw_file}" --country {args.country} --output-dir "{campaign_folder}" --output-prefix "verified"'
-        verify_success, _, verify_output = run_command(verify_cmd, "Step 5: Country verification", timeout=600)
+        verify_success, _, verify_output = run_command(verify_cmd, "Step 4: Country verification", timeout=600)
 
         if verify_success:
             verified_file = find_latest_lead_file(campaign_folder, 'verified_')
@@ -588,7 +674,7 @@ def main():
         else:
             print(f"[WARNING] Country verification failed, continuing with unverified leads")
 
-    # STEP 5.5: Auto-derived quality filtering (if not --skip-quality-filter)
+    # STEP 4.5: Auto-derived quality filtering (if not --skip-quality-filter)
     if not args.skip_quality_filter and raw_file:
         filter_args_list = ['--require-email', '--require-website']
 
@@ -601,7 +687,7 @@ def main():
             if apollo_filters.get('industries_resolved'):
                 combined = build_combined_whitelist(apollo_filters['industries_resolved'])
                 if combined:
-                    filter_args_list.extend(['--include-industries', ','.join(combined)])
+                    filter_args_list.extend(['--include-industries', f'"{",".join(combined)}"'])
         except Exception as e:
             print(f"[WARNING] Could not auto-derive industry whitelist: {e}")
 
@@ -611,7 +697,7 @@ def main():
             filter_args_list.extend(['--remove-foreign-tld', args.country])
 
         filter_cmd = f'py execution/lead_filter.py --input "{raw_file}" --output-dir "{campaign_folder}" --output-prefix "filtered" {" ".join(filter_args_list)}'
-        filter_success, _, _ = run_command(filter_cmd, "Step 5.5: Quality filtering", timeout=120)
+        filter_success, _, _ = run_command(filter_cmd, "Step 4.5: Quality filtering", timeout=120)
 
         if filter_success:
             filtered_file = find_latest_lead_file(campaign_folder, 'filtered_')
@@ -621,40 +707,41 @@ def main():
         else:
             print(f"[WARNING] Quality filtering failed, continuing with unfiltered leads")
 
-    # STEP 6: Optional AI enrichment
+    # STEP 5: Optional AI enrichment
     if args.enrich:
         print(f"\n[ENRICHMENT] Running AI enrichment (adds ~30-40 min)")
 
-        # Casual names
-        casual_cmd = f'py execution/ai_casual_name_generator.py --input "{raw_file}" --ai-provider openai'
-        casual_success, _, _ = run_command(casual_cmd, "Step 6a: AI casual names", timeout=900)
+        # Casual names — output to campaign folder with known filename
+        casual_output = campaign_folder / 'enriched_casual.json'
+        casual_cmd = f'py execution/ai_casual_name_generator.py --input "{raw_file}" --ai-provider openai --output-dir "{campaign_folder}" --output-prefix "enriched_casual"'
+        casual_success, _, casual_stdout = run_command(casual_cmd, "Step 5a: AI casual names", timeout=900)
 
         if casual_success:
-            casual_file = str(raw_file).replace('.json', '_casual.json')
-            if Path(casual_file).exists():
-                raw_file = Path(casual_file)
+            # Scripts print the output filepath on the last line of stdout
+            casual_file = find_latest_lead_file(campaign_folder, 'enriched_casual')
+            if casual_file:
+                raw_file = casual_file
 
-        # Icebreakers
-        icebreaker_cmd = f'py execution/ai_icebreaker_generator.py --input "{raw_file}" --ai-provider openai'
-        icebreaker_success, _, _ = run_command(icebreaker_cmd, "Step 6b: AI icebreakers", timeout=1800)
+        # Icebreakers — output to campaign folder with known filename
+        icebreaker_cmd = f'py execution/ai_icebreaker_generator.py --input "{raw_file}" --ai-provider openai --output-dir "{campaign_folder}" --output-prefix "enriched_icebreaker"'
+        icebreaker_success, _, _ = run_command(icebreaker_cmd, "Step 5b: AI icebreakers", timeout=1800)
 
         if icebreaker_success:
-            icebreaker_file = str(raw_file).replace('.json', '_icebreakers.json')
-            if Path(icebreaker_file).exists():
-                raw_file = Path(icebreaker_file)
+            icebreaker_file = find_latest_lead_file(campaign_folder, 'enriched_icebreaker')
+            if icebreaker_file:
+                raw_file = icebreaker_file
 
-        # Fallback enrichment
-        fallback_cmd = f'py execution/ai_fallback_enricher.py --input "{raw_file}"'
-        _, _, _ = run_command(fallback_cmd, "Step 6c: AI fallback enrichment", timeout=600)
+        # Fallback enrichment — supports --output for explicit path
+        fallback_output = campaign_folder / 'enriched_fallback.json'
+        fallback_cmd = f'py execution/ai_fallback_enricher.py --input "{raw_file}" --output "{fallback_output}"'
+        fallback_success, _, _ = run_command(fallback_cmd, "Step 5c: AI fallback enrichment", timeout=600)
 
-        # Update file path
-        fallback_file = str(raw_file).replace('.json', '_fallback.json')
-        if Path(fallback_file).exists():
-            raw_file = Path(fallback_file)
+        if fallback_success and fallback_output.exists():
+            raw_file = fallback_output
     else:
         print(f"\n[FAST-TRACK] Skipping AI enrichment (Saved ~30-40 minutes)")
 
-    # STEP 7: Upload to Google Sheets
+    # STEP 6: Upload to Google Sheets
     sheet_args = f'--input "{raw_file}"'
     if args.sheet_id:
         sheet_args += f' --sheet-id {args.sheet_id} --mode {args.sheet_mode}'
@@ -662,7 +749,7 @@ def main():
         sheet_title = f"{args.client_id.title()} - {args.campaign_name}"
         sheet_args += f' --sheet-title "{sheet_title}"'
     upload_cmd = f'py execution/google_sheets_exporter.py {sheet_args}'
-    upload_success, _, upload_output = run_command(upload_cmd, "Step 7: Upload to Google Sheets", timeout=300)
+    upload_success, _, upload_output = run_command(upload_cmd, "Step 6: Upload to Google Sheets", timeout=300)
 
     # Extract sheet URL
     sheet_url = None
@@ -673,32 +760,32 @@ def main():
             sheet_url = match.group(0)
 
             # Save to campaign folder
-            with open(campaign_folder / 'sheet_url.txt', 'w') as f:
+            with open(campaign_folder / 'sheet_url.txt', 'w', encoding='utf-8') as f:
                 f.write(sheet_url)
 
-    # STEP 8: Update client.json
+    # STEP 7: Update client.json
+    # Count final leads (before the conditional so final_count is always defined)
+    final_leads = load_leads(str(raw_file))
+    final_count = len(final_leads)
+
     client_file = Path(f'campaigns/{args.client_id}/client.json')
     if client_file.exists():
         client_data = load_json(str(client_file))
-
-        # Count final leads
-        final_leads = load_leads(str(raw_file))
-        final_count = len(final_leads)
 
         # Add campaign
         campaign_entry = {
             'campaign_id': campaign_id,
             'campaign_name': args.campaign_name,
             'type': 'apollo',
-            'created_at': datetime.utcnow().isoformat() + 'Z',
+            'created_at': datetime.now(timezone.utc).isoformat() + 'Z',
             'lead_count': final_count,
             'sheet_url': sheet_url or '',
             'sources': {name: count for name, _, count in lead_sources},
             'notes': f'Generated with fast orchestrator - {"with AI enrichment" if args.enrich else "fast-track"}'
         }
 
-        client_data['campaigns'].append(campaign_entry)
-        client_data['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+        client_data.setdefault('campaigns', []).append(campaign_entry)
+        client_data['updated_at'] = datetime.now(timezone.utc).isoformat() + 'Z'
 
         save_json(client_data, str(client_file))
 

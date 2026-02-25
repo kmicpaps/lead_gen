@@ -19,6 +19,7 @@ import json
 import argparse
 import time
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse, unquote
 from apify_client import ApifyClient
 from dotenv import load_dotenv
@@ -27,7 +28,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import Apollo URL parser
-sys.path.append(os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from apollo_url_parser import parse_apollo_url, extract_validation_keywords
 
 
@@ -63,24 +64,33 @@ def map_apollo_to_peakydev(apollo_filters):
 
     # Map company size to companyEmployeeSize (different format than Apollo)
     if apollo_filters.get('company_size'):
-        # Apollo format: ["1,10", "11,20", "21,50"] -> Peakydev format: ["2 - 10", "11 - 50"]
-        # Note: Peakydev has fewer size buckets, so we map granular Apollo sizes to broader Peakydev buckets
+        # Apollo uses granular or broad ranges; PeakyDev has fixed buckets:
+        # "0 - 1", "2 - 10", "11 - 50", "51 - 200", "201 - 500",
+        # "501 - 1000", "1001 - 5000", "5001 - 10000", "10000+"
         size_map = {
             '1,10': '2 - 10',
             '11,20': '11 - 50',
             '11,50': '11 - 50',
             '21,50': '11 - 50',
+            '51,100': '51 - 200',
             '51,200': '51 - 200',
+            '101,200': '51 - 200',
             '201,500': '201 - 500',
             '501,1000': '501 - 1000',
+            '1001,2000': '1001 - 5000',
             '1001,5000': '1001 - 5000',
+            '2001,5000': '1001 - 5000',
             '5001,10000': '5001 - 10000',
-            '10001+': '10000+'
+            '10001': '10000+',
+            '10001+': '10000+',
         }
         mapped_sizes = []
         for size in apollo_filters['company_size']:
             mapped_size = size_map.get(size, None)
-            if mapped_size and mapped_size not in mapped_sizes:
+            if mapped_size is None:
+                print(f"  WARNING: Unknown company size '{size}', skipping", file=sys.stderr)
+                continue
+            if mapped_size not in mapped_sizes:
                 mapped_sizes.append(mapped_size)
 
         # Add "0 - 1" if very small companies
@@ -239,7 +249,7 @@ def extract_org_keywords_from_url(apollo_url):
             org_keywords = [unquote(kw) for kw in params['qOrganizationKeywordTags[]']]
 
         return org_keywords
-    except:
+    except Exception:
         return []
 
 
@@ -256,7 +266,7 @@ def normalize_lead_to_schema(lead):
         try:
             parsed = urlparse(website_url if website_url.startswith('http') else f'http://{website_url}')
             company_domain = parsed.netloc.replace('www.', '')
-        except:
+        except Exception:
             company_domain = ''
 
     return {
@@ -275,7 +285,7 @@ def normalize_lead_to_schema(lead):
         'company_linkedin': lead.get('organizationLinkedinUrl', '') or lead.get('companyLinkedinUrl', ''),
         'company_domain': company_domain,
         'industry': lead.get('organizationIndustry', '') or lead.get('industry', ''),
-        'source': 'peakydev_leads_scraper'
+        'source': 'peakydev'
     }
 
 
@@ -401,11 +411,25 @@ def run_peakydev_scraper(apollo_url, max_leads, output_dir='.tmp/peakydev', outp
         # Initialize Apify client
         client = ApifyClient(apify_api_key)
 
-        # Run the actor
+        # Start the actor (non-blocking) so we can save run ID immediately
         print(f"\nStarting Apify actor: peakydev/leads-scraper-ppe...")
-        run = client.actor("peakydev/leads-scraper-ppe").call(run_input=peakydev_input)
+        started_run = client.actor("peakydev/leads-scraper-ppe").start(run_input=peakydev_input)
+        run_id = started_run['id']
+        print(f"Actor run ID: {run_id}")
 
-        print(f"Actor run ID: {run['id']}")
+        # Save run ID for recovery (if local process is killed, Apify run continues)
+        run_id_file = Path(output_dir) / '.active_run.json'
+        run_id_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(run_id_file, 'w', encoding='utf-8') as _f:
+            json.dump({'run_id': run_id, 'actor': 'peakydev/leads-scraper-ppe',
+                       'started_at': datetime.now().isoformat()}, _f)
+
+        # Wait for the actor to finish
+        run = client.run(run_id).wait_for_finish()
+
+        # Clean up run ID file
+        run_id_file.unlink(missing_ok=True)
+
         print(f"Status: {run['status']}")
 
         # Check if run was successful

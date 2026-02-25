@@ -311,7 +311,7 @@ def fetch_from_apollo(cookies, dry_run=False):
                 try:
                     err = resp.json()
                     print(f"  -> Error: {json.dumps(err, indent=2)[:500]}")
-                except:
+                except Exception:
                     pass
                 continue
 

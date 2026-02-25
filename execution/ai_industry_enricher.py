@@ -18,7 +18,7 @@ import argparse
 import time
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -320,7 +320,7 @@ def enrich_single_lead(lead: Dict, ai_provider: str, api_key: str,
                 lead['industry'] = industry
                 lead['industry_source'] = 'sic_naics'
                 lead['industry_generated_by'] = ai_provider
-                lead['industry_generated_at'] = datetime.utcnow().isoformat()
+                lead['industry_generated_at'] = datetime.now(timezone.utc).isoformat()
                 lead['industry_error'] = None
 
                 return lead
@@ -359,7 +359,7 @@ def enrich_single_lead(lead: Dict, ai_provider: str, api_key: str,
                 lead['industry'] = industry
                 lead['industry_source'] = 'website'
                 lead['industry_generated_by'] = ai_provider
-                lead['industry_generated_at'] = datetime.utcnow().isoformat()
+                lead['industry_generated_at'] = datetime.now(timezone.utc).isoformat()
                 lead['industry_error'] = None
 
                 return lead
@@ -467,6 +467,10 @@ def enrich_leads_concurrent(leads: List[Dict], ai_provider: str, api_key: str,
                 rate = completed / elapsed if elapsed > 0 else 0
                 print(f"[PROGRESS] {completed}/{len(leads_to_process)} processed | {stats['success']} success | {stats['failed']} failed | {rate:.1f} leads/sec")
 
+    # Clean up force_regenerate flag to prevent it persisting across calls
+    if hasattr(enrich_single_lead, 'force_regenerate'):
+        delattr(enrich_single_lead, 'force_regenerate')
+
     # Update original leads list with enriched data
     enriched_dict = {id(lead): enriched for lead, enriched in zip(leads_to_process, enriched_leads)}
     for i, lead in enumerate(leads):
@@ -474,7 +478,7 @@ def enrich_leads_concurrent(leads: List[Dict], ai_provider: str, api_key: str,
             leads[i] = enriched_dict[id(lead)]
 
     elapsed = time.time() - start_time
-    print(f"\n[COMPLETE] Processed {len(leads_to_process)} leads in {elapsed:.1f}s ({len(leads_to_process)/elapsed:.1f} leads/sec)")
+    print(f"\n[COMPLETE] Processed {len(leads_to_process)} leads in {elapsed:.1f}s ({len(leads_to_process)/max(elapsed, 0.1):.1f} leads/sec)")
 
     return leads, stats
 
