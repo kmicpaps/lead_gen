@@ -114,6 +114,14 @@ Save filters to `.tmp/url_draft.json` and run:
 
 ```bash
 py execution/apollo_url_builder.py --from-json .tmp/url_draft.json --validate
+
+# Or build directly from CLI flags:
+py execution/apollo_url_builder.py \
+  --titles "CEO,Owner,Managing Director" \
+  --industries "Construction,Building Materials" \
+  --org-locations "Latvia" \
+  --company-size "11,50" "51,200" \
+  --validate
 ```
 
 Present to user:

@@ -14,10 +14,10 @@ import sys
 import json
 import argparse
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from utils import RateLimiter
+from utils import RateLimiter, load_leads, save_json
 
 # Load environment variables
 load_dotenv()
@@ -177,7 +177,7 @@ def enrich_single_lead(lead, ai_provider, api_key, rate_limiter):
             if success and casual_name:
                 lead['casual_org_name'] = casual_name
                 lead['casual_org_name_generated_by'] = ai_provider
-                lead['casual_org_name_generated_at'] = datetime.now().isoformat()
+                lead['casual_org_name_generated_at'] = datetime.now(timezone.utc).isoformat()
                 return lead
 
             if attempt < max_retries - 1:
@@ -198,7 +198,7 @@ def enrich_single_lead(lead, ai_provider, api_key, rate_limiter):
     fallback_name = remove_legal_suffixes(company_name)
     lead['casual_org_name'] = fallback_name
     lead['casual_org_name_generated_by'] = 'fallback'
-    lead['casual_org_name_generated_at'] = datetime.now().isoformat()
+    lead['casual_org_name_generated_at'] = datetime.now(timezone.utc).isoformat()
 
     return lead
 
@@ -262,9 +262,6 @@ def enrich_leads_concurrent(leads, ai_provider, api_key, force_regenerate=False)
     enriched_count = 0
     failed_count = 0
 
-    # Create a mapping to preserve order
-    lead_map = {id(lead): lead for lead in leads}
-
     start_time = time.time()
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -282,7 +279,6 @@ def enrich_leads_concurrent(leads, ai_provider, api_key, force_regenerate=False)
 
             try:
                 updated_lead = future.result()
-                lead_map[lead_id] = updated_lead
 
                 if updated_lead.get('casual_org_name'):
                     enriched_count += 1
@@ -333,8 +329,7 @@ def main():
 
     try:
         # Load leads
-        with open(args.input, 'r', encoding='utf-8') as f:
-            leads = json.load(f)
+        leads = load_leads(args.input)
 
         if not leads:
             print("No leads to enrich", file=sys.stderr)
@@ -369,8 +364,7 @@ def main():
         filename = f"{args.output_prefix}_{timestamp}_{len(leads)}leads.json"
         filepath = os.path.join(args.output_dir, filename)
 
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(leads, f, indent=2, ensure_ascii=False)
+        save_json(leads, filepath)
 
         print(f"\nEnriched leads saved to: {filepath}")
         print(filepath)  # Print filepath to stdout for caller

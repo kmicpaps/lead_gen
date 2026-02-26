@@ -165,36 +165,9 @@ def map_apollo_to_codecrafter(apollo_filters):
     if apollo_filters.get('funding'):
         codecrafter_input['funding'] = apollo_filters['funding']
 
-    # Map functions/departments
-    if apollo_filters.get('functions'):
-        codecrafter_input['functional_level'] = apollo_filters['functions']
+    # Note: functions/departments not supported by CodeCrafter API — skipped
 
     return codecrafter_input
-
-
-def extract_org_keywords_from_url(apollo_url):
-    """
-    Extract organization keywords from Apollo URL.
-    These are often in qOrganizationKeywordTags[] parameter.
-    """
-    try:
-        from urllib.parse import parse_qs, urlparse, unquote
-        parsed = urlparse(apollo_url)
-        if '?' in parsed.fragment:
-            query_string = parsed.fragment.split('?', 1)[1]
-        else:
-            query_string = parsed.query
-
-        params = parse_qs(query_string)
-
-        # Extract organization keywords
-        org_keywords = []
-        if 'qOrganizationKeywordTags[]' in params:
-            org_keywords = [unquote(kw) for kw in params['qOrganizationKeywordTags[]']]
-
-        return org_keywords
-    except Exception:
-        return []
 
 
 def normalize_lead_to_schema(lead):
@@ -246,8 +219,7 @@ def validate_leads_against_filters(leads, apollo_filters, validation_keywords):
 
     # Extract validation criteria
     title_keywords = [t.lower() for t in apollo_filters.get('titles', [])]
-    seniority_keywords = [s.lower() for s in apollo_filters.get('seniority', [])]
-    location_keywords = [loc.lower() for loc in apollo_filters.get('locations', [])]
+    location_keywords = [loc.lower() for loc in (apollo_filters.get('org_locations') or apollo_filters.get('locations', []))]
 
     # Combine all validation keywords
     all_keywords = validation_keywords.lower().split(',') if validation_keywords else []
@@ -256,28 +228,21 @@ def validate_leads_against_filters(leads, apollo_filters, validation_keywords):
     for lead in leads:
         title = lead.get('title', '').lower()
         location = f"{lead.get('city', '')} {lead.get('country', '')}".lower()
-
-        # Check if lead matches any of the filters
-        matches = False
-
-        # Title match
-        if title_keywords and any(kw in title for kw in title_keywords):
-            matches = True
-
-        # Location match
-        if location_keywords and any(kw in location for kw in location_keywords):
-            matches = True
-
-        # General keyword match
         lead_text = f"{title} {location} {lead.get('org_name', '')}".lower()
-        if all_keywords and any(kw in lead_text for kw in all_keywords):
-            matches = True
 
-        # If no specific filters, count as match
-        if not title_keywords and not location_keywords and not all_keywords:
-            matches = True
+        # AND logic: lead must match ALL specified filter categories
+        passes_all = True
 
-        if matches:
+        if title_keywords and not any(kw in title for kw in title_keywords):
+            passes_all = False
+
+        if location_keywords and not any(kw in location for kw in location_keywords):
+            passes_all = False
+
+        if all_keywords and not any(kw in lead_text for kw in all_keywords):
+            passes_all = False
+
+        if passes_all:
             match_count += 1
 
     match_percentage = (match_count / total_count * 100) if total_count > 0 else 0
@@ -310,19 +275,14 @@ def run_codecrafter_scraper(apollo_url, max_leads, output_dir='.tmp/codecrafter'
         apollo_filters = parse_apollo_url(apollo_url)
         validation_keywords = extract_validation_keywords(apollo_filters)
 
-        # Extract organization keywords from URL
-        org_keywords = extract_org_keywords_from_url(apollo_url)
-        if org_keywords and 'keywords' not in apollo_filters:
-            apollo_filters['keywords'] = org_keywords
-        elif org_keywords:
-            apollo_filters['keywords'].extend(org_keywords)
+        # Note: org keywords are already extracted by parse_apollo_url() into apollo_filters['keywords']
 
         # Map to code_crafter input schema
         codecrafter_input = map_apollo_to_codecrafter(apollo_filters)
 
         if codecrafter_input is None:
             print("Aborting: Cannot scrape without industry filter. Resolve hex IDs first.", file=sys.stderr)
-            sys.exit(3)
+            return False, None, 0.0
 
         # Set result count
         target_leads = 25 if test_only else max_leads

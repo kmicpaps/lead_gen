@@ -18,7 +18,7 @@ def main():
             env_content = f.read()
 
         # Find APOLLO_COOKIE in .env
-        match = re.search(r'(?:^|\n)APOLLO_COOKIE=(\[.*?\n\])', env_content, re.DOTALL | re.MULTILINE)
+        match = re.search(r'(?:^|\n)APOLLO_COOKIE=(\[.*?\])', env_content, re.DOTALL | re.MULTILINE)
 
         if not match:
             print("❌ APOLLO_COOKIE not found in .env")

@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
-from utils import RateLimiter
+from utils import RateLimiter, load_leads, save_json
 
 # Load environment variables
 load_dotenv()
@@ -40,7 +40,7 @@ except ImportError:
     anthropic = None
 
 # Import website scraper
-sys.path.append(str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent))
 try:
     from scrape_website_content import scrape_website
 except ImportError:
@@ -64,16 +64,18 @@ def extract_industry_data(lead: Dict) -> Tuple[bool, Optional[Dict], Optional[st
         - codes_dict: {'sic_codes': [...], 'naics_codes': [...]} or None
         - website_url: Company website URL or None
     """
-    org_name = lead.get('org_name', {})
+    # Check for SIC/NAICS codes (available if lead has raw org data as dict)
+    org_name = lead.get('org_name', '')
+    sic_codes = lead.get('sic_codes', [])
+    naics_codes = lead.get('naics_codes', [])
 
-    # Check if org_name is a dict (Olympus format)
+    # Legacy: org_name might be a dict in pre-normalized data
     if isinstance(org_name, dict):
-        sic_codes = org_name.get('sic_codes', [])
-        naics_codes = org_name.get('naics_codes', [])
+        sic_codes = sic_codes or org_name.get('sic_codes', [])
+        naics_codes = naics_codes or org_name.get('naics_codes', [])
 
-        # If we have valid codes
-        if sic_codes or naics_codes:
-            return True, {'sic_codes': sic_codes, 'naics_codes': naics_codes}, None
+    if sic_codes or naics_codes:
+        return True, {'sic_codes': sic_codes, 'naics_codes': naics_codes}, None
 
     # No codes - get website for Path B
     website_url = lead.get('website_url') or lead.get('company_website')
@@ -101,8 +103,8 @@ def classify_from_codes_openai(sic_codes: List[str], naics_codes: List[str],
         raise ImportError("openai package not installed")
 
     # Format codes for prompt
-    sic_str = ", ".join(sic_codes) if sic_codes else "None"
-    naics_str = ", ".join(naics_codes) if naics_codes else "None"
+    sic_str = ", ".join(str(c) for c in sic_codes) if sic_codes else "None"
+    naics_str = ", ".join(str(c) for c in naics_codes) if naics_codes else "None"
 
     prompt = f"""You are categorizing companies based on their industry classification codes.
 
@@ -151,8 +153,8 @@ def classify_from_codes_anthropic(sic_codes: List[str], naics_codes: List[str],
         raise ImportError("anthropic package not installed")
 
     # Format codes for prompt
-    sic_str = ", ".join(sic_codes) if sic_codes else "None"
-    naics_str = ", ".join(naics_codes) if naics_codes else "None"
+    sic_str = ", ".join(str(c) for c in sic_codes) if sic_codes else "None"
+    naics_str = ", ".join(str(c) for c in naics_codes) if naics_codes else "None"
 
     prompt = f"""You are categorizing companies based on their industry classification codes.
 
@@ -173,7 +175,7 @@ Return ONLY the industry name, nothing else."""
 
     client = anthropic.Anthropic(api_key=api_key)
     response = client.messages.create(
-        model="claude-3-haiku-20240307",
+        model="claude-3-5-haiku-20241022",
         max_tokens=20,
         temperature=0.3,
         messages=[{"role": "user", "content": prompt}]
@@ -273,7 +275,7 @@ Return ONLY the industry category, nothing else."""
 
     client = anthropic.Anthropic(api_key=api_key)
     response = client.messages.create(
-        model="claude-3-haiku-20240307",
+        model="claude-3-5-haiku-20241022",
         max_tokens=20,
         temperature=0.3,
         messages=[{"role": "user", "content": prompt}]
@@ -284,7 +286,7 @@ Return ONLY the industry category, nothing else."""
 
 
 def enrich_single_lead(lead: Dict, ai_provider: str, api_key: str,
-                      rate_limiter: RateLimiter) -> Dict:
+                      rate_limiter: RateLimiter, force_regenerate: bool = False) -> Dict:
     """
     Process one lead with retry logic (3 attempts, exponential backoff).
 
@@ -298,7 +300,7 @@ def enrich_single_lead(lead: Dict, ai_provider: str, api_key: str,
         Updated lead dict with industry fields
     """
     # Check if already has industry (and not force regenerate)
-    if lead.get('industry') and not hasattr(enrich_single_lead, 'force_regenerate'):
+    if lead.get('industry') and not force_regenerate:
         return lead
 
     # Extract industry data
@@ -337,14 +339,15 @@ def enrich_single_lead(lead: Dict, ai_provider: str, api_key: str,
                     # No meaningful content
                     lead['industry'] = ''
                     lead['industry_error'] = 'no_content'
+                    lead['industry_source'] = None
                     return lead
 
-                # Get company name
-                org_name = lead.get('org_name')
+                # Get company name (org_name is a string in normalized output)
+                org_name = lead.get('org_name', '')
                 if isinstance(org_name, dict):
-                    company_name = lead.get('company_name') or org_name.get('name', 'Unknown')
+                    company_name = org_name.get('name', '') or lead.get('company_name', '') or 'Unknown'
                 else:
-                    company_name = lead.get('company_name') or lead.get('name') or org_name or 'Unknown'
+                    company_name = lead.get('company_name', '') or org_name or 'Unknown'
 
                 if isinstance(company_name, dict):
                     company_name = 'Unknown'
@@ -368,18 +371,30 @@ def enrich_single_lead(lead: Dict, ai_provider: str, api_key: str,
                 # No data available
                 lead['industry'] = ''
                 lead['industry_error'] = 'no_data'
+                lead['industry_source'] = None
                 return lead
 
         except Exception as e:
+            error_str = str(e).lower()
+            is_scrape_error = (website_url and not has_codes and
+                               any(kw in error_str for kw in ['timeout', 'connection', 'dns', 'ssl', 'refused', 'unreachable']))
+
+            if is_scrape_error:
+                # Scrape failures (network issues) won't resolve with retries — fail fast
+                lead['industry'] = ''
+                lead['industry_error'] = 'scrape_failed'
+                lead['industry_source'] = None
+                return lead
+
             if attempt < MAX_RETRIES - 1:
-                # Exponential backoff
+                # AI API errors: exponential backoff (rate limits, transient failures)
                 wait_time = (2 ** attempt) * 5  # 5s, 10s, 20s
                 time.sleep(wait_time)
             else:
                 # Final attempt failed
-                error_type = 'scrape_failed' if website_url and not has_codes else 'ai_failed'
                 lead['industry'] = ''
-                lead['industry_error'] = error_type
+                lead['industry_error'] = 'ai_failed'
+                lead['industry_source'] = None
                 return lead
 
     return lead
@@ -399,15 +414,13 @@ def enrich_leads_concurrent(leads: List[Dict], ai_provider: str, api_key: str,
     Returns:
         (updated_leads, stats)
     """
-    # Set force regenerate flag
-    if force_regenerate:
-        enrich_single_lead.force_regenerate = True
-
-    # Filter leads that need enrichment
+    # Filter leads that need enrichment (track original index for writeback)
     leads_to_process = []
-    for lead in leads:
+    lead_index_map = {}  # id(lead) -> index in leads list
+    for i, lead in enumerate(leads):
         if force_regenerate or not lead.get('industry'):
             leads_to_process.append(lead)
+            lead_index_map[id(lead)] = i
 
     print(f"\n[INFO] Processing {len(leads_to_process)} leads (skipping {len(leads) - len(leads_to_process)} with existing industry)")
 
@@ -416,7 +429,6 @@ def enrich_leads_concurrent(leads: List[Dict], ai_provider: str, api_key: str,
     rate_limiter = RateLimiter(rate_limit)
 
     # Process concurrently
-    enriched_leads = []
     stats = {
         'total': len(leads_to_process),
         'success': 0,
@@ -432,14 +444,17 @@ def enrich_leads_concurrent(leads: List[Dict], ai_provider: str, api_key: str,
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {
-            executor.submit(enrich_single_lead, lead, ai_provider, api_key, rate_limiter): lead
+            executor.submit(enrich_single_lead, lead, ai_provider, api_key, rate_limiter, force_regenerate): lead
             for lead in leads_to_process
         }
 
         completed = 0
+        enriched_map = {}  # original_index -> enriched_lead
         for future in as_completed(futures):
+            original_lead = futures[future]
             enriched_lead = future.result()
-            enriched_leads.append(enriched_lead)
+            orig_idx = lead_index_map[id(original_lead)]
+            enriched_map[orig_idx] = enriched_lead
 
             completed += 1
 
@@ -467,15 +482,9 @@ def enrich_leads_concurrent(leads: List[Dict], ai_provider: str, api_key: str,
                 rate = completed / elapsed if elapsed > 0 else 0
                 print(f"[PROGRESS] {completed}/{len(leads_to_process)} processed | {stats['success']} success | {stats['failed']} failed | {rate:.1f} leads/sec")
 
-    # Clean up force_regenerate flag to prevent it persisting across calls
-    if hasattr(enrich_single_lead, 'force_regenerate'):
-        delattr(enrich_single_lead, 'force_regenerate')
-
-    # Update original leads list with enriched data
-    enriched_dict = {id(lead): enriched for lead, enriched in zip(leads_to_process, enriched_leads)}
-    for i, lead in enumerate(leads):
-        if id(lead) in enriched_dict:
-            leads[i] = enriched_dict[id(lead)]
+    # Update original leads list with enriched data (using index-based map)
+    for idx, enriched_lead in enriched_map.items():
+        leads[idx] = enriched_lead
 
     elapsed = time.time() - start_time
     print(f"\n[COMPLETE] Processed {len(leads_to_process)} leads in {elapsed:.1f}s ({len(leads_to_process)/max(elapsed, 0.1):.1f} leads/sec)")
@@ -520,8 +529,7 @@ def main():
         sys.exit(1)
 
     print(f"[INFO] Loading leads from {args.input}")
-    with open(input_path, 'r', encoding='utf-8') as f:
-        leads = json.load(f)
+    leads = load_leads(str(input_path))
 
     print(f"[INFO] Loaded {len(leads)} leads")
     print(f"[INFO] Using AI provider: {args.ai_provider}")
@@ -537,18 +545,18 @@ def main():
     output_filename = f"industry_enriched_{timestamp}_{len(enriched_leads)}leads.json"
     output_path = output_dir / output_filename
 
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(enriched_leads, f, indent=2, ensure_ascii=False)
+    save_json(enriched_leads, str(output_path))
 
     print(f"\n[OK] Saved enriched leads to {output_path}")
 
     # Print statistics
     print("\n=== Industry Enrichment Statistics ===")
+    total = stats['total'] or 1  # Avoid division by zero
     print(f"Total processed: {stats['total']}")
-    print(f"Successful: {stats['success']} ({stats['success']/stats['total']*100:.1f}%)")
-    print(f"  - From SIC/NAICS codes: {stats['sic_naics']} ({stats['sic_naics']/stats['total']*100:.1f}%)")
-    print(f"  - From website: {stats['website']} ({stats['website']/stats['total']*100:.1f}%)")
-    print(f"Failed: {stats['failed']} ({stats['failed']/stats['total']*100:.1f}%)")
+    print(f"Successful: {stats['success']} ({stats['success']/total*100:.1f}%)")
+    print(f"  - From SIC/NAICS codes: {stats['sic_naics']} ({stats['sic_naics']/total*100:.1f}%)")
+    print(f"  - From website: {stats['website']} ({stats['website']/total*100:.1f}%)")
+    print(f"Failed: {stats['failed']} ({stats['failed']/total*100:.1f}%)")
     print(f"  - No data: {stats['no_data']}")
     print(f"  - Scrape failed: {stats['scrape_failed']}")
     print(f"  - AI failed: {stats['ai_failed']}")

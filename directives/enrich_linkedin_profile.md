@@ -217,10 +217,11 @@ py execution/fast_lead_orchestrator.py --client-id acme_corp --campaign-name "La
 py execution/email_verifier.py --input .tmp/merged_leads.json
 
 # Step 3: LinkedIn enrichment (NEW)
+# Output: .tmp/linkedin_enriched/linkedin_enriched_{timestamp}_{N}leads.json
 py execution/linkedin_enricher.py --input .tmp/verified_leads.json
 
-# Step 4: Industry enrichment (existing)
-py execution/ai_industry_enricher.py --input .tmp/linkedin_enriched_leads.json
+# Step 4: Industry enrichment (use latest output from step 3)
+py execution/ai_industry_enricher.py --input .tmp/linkedin_enriched/linkedin_enriched_*.json
 
 # Step 5: Icebreaker generation (existing, now with LinkedIn data)
 py execution/ai_icebreaker_generator.py --input .tmp/industry_enriched_leads.json

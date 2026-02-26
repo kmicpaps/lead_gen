@@ -286,29 +286,17 @@ Template should be plain text file, one or more examples showing desired style.
 Full workflow with AI enrichment:
 
 ```bash
-# Step 1: Scrape leads (existing)
-py execution/run_apify_b2b_leads_finder.py --apollo-url "..." --max-leads 1000
+# Use the V8 orchestrator for the full pipeline:
+py execution/fast_lead_orchestrator.py --apollo-url "..." --target-leads 1000 --client-id my_client --scrapers olympus
 
-# Step 2: Merge & dedup (existing)
-py execution/merge_deduplicate_leads.py --source-file b2b_leads.json
+# Or run icebreaker enrichment standalone:
+py execution/ai_icebreaker_generator.py --input leads.json --output-dir .tmp/ai_enriched
 
-# Step 3: Email validation (existing)
-py execution/verify_emails_leadmagic_fast.py --input merged_leads.json
+# Fill gaps with fallback enricher:
+py execution/ai_fallback_enricher.py --input enriched_leads.json
 
-# Step 4: Email enrichment (existing)
-py execution/enrich_emails_leadmagic_fast.py --input verified_leads.json
-
-# Step 5: Cleanup (existing)
-# ... cleanup script ...
-
-# Step 6: AI Enrichment - Casual names (NEW)
-py execution/ai_casual_name_generator.py --input cleaned_leads.json
-
-# Step 7: AI Enrichment - Icebreakers (NEW)
-py execution/ai_icebreaker_generator.py --input casual_enriched_leads.json
-
-# Step 8: Export to Google Sheets (existing, updated)
-py execution/upload_to_google_sheet.py --input icebreaker_enriched_leads.json
+# Export to Google Sheets:
+py execution/google_sheets_exporter.py --input final_leads.json
 ```
 
 ## Performance Optimization

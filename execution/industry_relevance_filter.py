@@ -110,12 +110,16 @@ def _extract_json_from_text(text: str) -> dict:
         except json.JSONDecodeError:
             pass
 
+    print(f"  WARNING: Could not extract JSON from AI response ({len(text)} chars)", file=sys.stderr)
     return {}
 
 
 def _call_openai(prompt: str) -> str:
     """Call OpenAI API and return response text."""
-    import openai
+    try:
+        import openai
+    except ImportError:
+        raise ImportError("openai package not installed. Run: pip install openai")
     client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     response = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -128,10 +132,13 @@ def _call_openai(prompt: str) -> str:
 
 def _call_anthropic(prompt: str) -> str:
     """Call Anthropic API and return response text."""
-    import anthropic
+    try:
+        import anthropic
+    except ImportError:
+        raise ImportError("anthropic package not installed. Run: pip install anthropic")
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     message = client.messages.create(
-        model="claude-3-haiku-20240307",
+        model="claude-3-5-haiku-20241022",
         max_tokens=4096,
         temperature=0.1,
         messages=[{"role": "user", "content": prompt}],

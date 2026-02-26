@@ -7,10 +7,11 @@ import json
 import argparse
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
 import time
-from utils import RateLimiter
+from utils import RateLimiter, load_leads, save_json
 
 
 def extract_org_name(lead):
@@ -27,12 +28,13 @@ def extract_org_name(lead):
 
 def generate_generic_icebreaker(lead, api_key, rate_limiter):
     """Generate a generic icebreaker when website content is unavailable."""
+    company_name = lead.get('casual_org_name') or extract_org_name(lead)
+    industry = lead.get('industry', '') or lead.get('linkedin_industry', '') or 'their industry'
     try:
         rate_limiter.acquire()
 
         client = OpenAI(api_key=api_key)
 
-        company_name = lead.get('casual_org_name') or extract_org_name(lead)
         title = lead.get('title', '')
         country = lead.get('country', '')
 
@@ -42,7 +44,7 @@ Lead information:
 - Company: {company_name}
 - Job title: {title}
 - Location: {country}
-- Industry: Precast concrete / construction
+- Industry: {industry}
 
 Write a 1-2 sentence professional icebreaker that:
 1. Shows interest in their industry or role
@@ -51,7 +53,7 @@ Write a 1-2 sentence professional icebreaker that:
 4. Does NOT ask questions
 5. Does NOT make assumptions about specific projects or activities
 
-Example: "Saw that {company_name} is in the precast concrete space in {country}. Your role in {title} caught my attention."
+Example: "Saw that {company_name} is active in {industry} in {country}. Your role as {title} caught my attention."
 
 Return ONLY the icebreaker text, nothing else."""
 
@@ -72,7 +74,7 @@ Return ONLY the icebreaker text, nothing else."""
 
     except Exception as e:
         print(f"Error generating generic icebreaker for {company_name}: {e}", file=sys.stderr)
-        return f"Noticed {company_name}'s work in the construction industry. Would be great to connect."
+        return f"Noticed {company_name}'s work in {industry}. Would be great to connect."
 
 
 def generate_company_summary(lead, api_key, rate_limiter):
@@ -82,12 +84,11 @@ def generate_company_summary(lead, api_key, rate_limiter):
     if not website_content or len(website_content) < 50:
         return ""
 
+    company_name = lead.get('casual_org_name') or extract_org_name(lead)
     try:
         rate_limiter.acquire()
 
         client = OpenAI(api_key=api_key)
-
-        company_name = lead.get('casual_org_name') or extract_org_name(lead)
 
         prompt = f"""You are summarizing a company's website for sales research.
 
@@ -142,8 +143,7 @@ def main():
         return 1
 
     # Load leads
-    with open(args.input, 'r', encoding='utf-8') as f:
-        leads = json.load(f)
+    leads = load_leads(args.input)
 
     print(f"Loaded {len(leads)} leads")
 
@@ -161,27 +161,42 @@ def main():
     # Rate limiter: 50 requests/sec for OpenAI
     rate_limiter = RateLimiter(50)
 
-    # Add missing fields
+    # Add missing fields using concurrent processing
     print("\nEnriching leads...")
     start_time = time.time()
 
-    for i, lead in enumerate(leads):
-        # Add generic icebreaker if missing
+    def enrich_single(i, lead):
+        """Enrich a single lead with missing icebreaker/summary."""
+        changes = []
         if not lead.get('icebreaker'):
             icebreaker = generate_generic_icebreaker(lead, api_key, rate_limiter)
             lead['icebreaker'] = icebreaker
             lead['icebreaker_generated_by'] = 'openai_generic'
-            lead['icebreaker_generated_at'] = datetime.now().isoformat()
-            print(f"  [{i+1}/{len(leads)}] Added generic icebreaker for {lead.get('casual_org_name', 'Unknown')}")
+            lead['icebreaker_generated_at'] = datetime.now(timezone.utc).isoformat()
+            changes.append('icebreaker')
 
-        # Add company summary if missing (and website content exists)
         if not lead.get('company_summary') and lead.get('website_content'):
             summary = generate_company_summary(lead, api_key, rate_limiter)
             if summary:
                 lead['company_summary'] = summary
                 lead['company_summary_generated_by'] = 'openai'
-                lead['company_summary_generated_at'] = datetime.now().isoformat()
-                print(f"  [{i+1}/{len(leads)}] Added company summary for {lead.get('casual_org_name', 'Unknown')}")
+                lead['company_summary_generated_at'] = datetime.now(timezone.utc).isoformat()
+                changes.append('summary')
+        return i, changes
+
+    completed = 0
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(enrich_single, i, lead): i for i, lead in enumerate(leads)}
+        for future in as_completed(futures):
+            try:
+                i, changes = future.result()
+            except Exception as exc:
+                completed += 1
+                print(f"  [{completed}/{len(leads)}] Thread error: {exc}", file=sys.stderr)
+                continue
+            completed += 1
+            if changes:
+                print(f"  [{completed}/{len(leads)}] Added {', '.join(changes)} for {leads[i].get('casual_org_name', 'Unknown')}")
 
     elapsed = time.time() - start_time
 
@@ -195,10 +210,7 @@ def main():
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = os.path.join(input_dir, f"{input_name}_complete{input_ext}")
 
-    os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
-
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(leads, f, indent=2, ensure_ascii=False)
+    save_json(leads, output_path)
 
     print(f"\nCompleted in {elapsed:.1f}s")
     print(f"Enriched leads saved to: {output_path}")

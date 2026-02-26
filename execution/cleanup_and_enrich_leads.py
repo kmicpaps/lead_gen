@@ -45,19 +45,21 @@ def get_company_name(lead):
 def generate_generic_icebreaker(lead):
     """Generate a generic icebreaker based on available lead info."""
     name = lead.get('name', '') or lead.get('full_name', '')
-    first_name = lead.get('first_name', '') or name.split()[0] if name else ''
+    name_parts = name.split() if name else []
+    first_name = lead.get('first_name', '') or (name_parts[0] if name_parts else '')
     company_name = lead.get('casual_org_name', '') or get_company_name(lead)
     title = lead.get('title', '') or lead.get('job_title', '')
+    fn = first_name or 'there'
 
-    # Template options
+    # Template options (generic — no hardcoded industry references)
     if company_name and title:
-        return f"Hi {first_name}, I noticed your work as {title} at {company_name}. I'd love to connect and explore potential collaboration opportunities in the precast concrete industry."
+        return f"Hi {fn}, I noticed your work as {title} at {company_name}. I'd love to connect and explore potential collaboration opportunities."
     elif company_name:
-        return f"Hi {first_name}, I came across {company_name} and was impressed by your work in the concrete solutions space. Would love to connect and discuss potential synergies."
+        return f"Hi {fn}, I came across {company_name} and was impressed by your work. Would love to connect and discuss potential synergies."
     elif title:
-        return f"Hi {first_name}, I see you're working as {title} in the construction industry. I'd be interested in connecting to explore opportunities in precast concrete solutions."
+        return f"Hi {fn}, I see you're working as {title}. I'd be interested in connecting to explore opportunities."
     else:
-        return f"Hi {first_name}, I came across your profile and noticed your experience in the construction industry. I'd love to connect and discuss opportunities in the precast concrete sector."
+        return f"Hi {fn}, I came across your profile and would love to connect and discuss potential opportunities."
 
 def main():
     parser = argparse.ArgumentParser(description='Clean up and enrich leads')

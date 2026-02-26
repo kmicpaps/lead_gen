@@ -422,7 +422,7 @@ def main():
         return 0
 
     # Step 3: Save results
-    from utils import save_leads
+    from utils import save_leads, save_json
 
     # Remove internal classification fields before saving
     for lead in domestic:
@@ -445,8 +445,7 @@ def main():
             args.output_dir,
             f"rejected_{timestamp}_{len(rejected)}leads.json"
         )
-        with open(rejected_path, "w", encoding="utf-8") as f:
-            json.dump(rejected, f, indent=2, ensure_ascii=False)
+        save_json(rejected, rejected_path)
         print(f"Rejected leads saved: {rejected_path}")
 
     # Print final filepath to stdout for caller to capture

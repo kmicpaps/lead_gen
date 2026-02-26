@@ -283,7 +283,7 @@ def _call_anthropic(prompt):
             "Content-Type": "application/json"
         },
         json={
-            "model": "claude-3-haiku-20240307",
+            "model": "claude-3-5-haiku-20241022",
             "max_tokens": 2000,
             "messages": [{"role": "user", "content": prompt}]
         },
@@ -307,13 +307,35 @@ def _call_anthropic(prompt):
         raise Exception(f"Failed to parse AI response as JSON: {e}\nResponse: {content}")
 
 
-def generate_client_id(company_name):
-    """Generate a clean client_id from company name."""
+def generate_client_id(company_name, domain=None):
+    """Generate a clean client_id from company name.
+
+    Falls back to domain-based ID or a hash if the name is entirely non-Latin
+    (e.g. Cyrillic, Chinese) and stripping leaves nothing.
+    """
+    import hashlib
     # Remove special characters, convert to lowercase, replace spaces with underscores
     client_id = re.sub(r'[^a-zA-Z0-9\s]', '', company_name)
     client_id = client_id.lower().strip().replace(' ', '_')
+    # Remove consecutive underscores
+    client_id = re.sub(r'_+', '_', client_id).strip('_')
     # Limit length
     client_id = client_id[:30]
+
+    # Fallback: if result is empty (non-Latin name), try domain or hash
+    if not client_id:
+        if domain:
+            # Extract domain name without TLD (e.g. "example" from "https://example.com")
+            parsed = urlparse(domain if '://' in domain else f'https://{domain}')
+            host = parsed.netloc or parsed.path
+            host = host.replace('www.', '')
+            client_id = host.split('.')[0] if '.' in host else host
+            client_id = re.sub(r'[^a-zA-Z0-9]', '_', client_id).lower().strip('_')[:30]
+        if not client_id:
+            # Last resort: short hash of original name
+            name_hash = hashlib.md5(company_name.encode('utf-8')).hexdigest()[:8]
+            client_id = f"client_{name_hash}"
+
     return client_id
 
 
@@ -324,7 +346,7 @@ def create_client_json(analysis, url, email=None):
     apollo = analysis.get('apollo_filter_suggestions', {})
 
     company_name = company.get('company_name', 'Unknown')
-    client_id = generate_client_id(company_name)
+    client_id = generate_client_id(company_name, domain=url)
 
     client_data = {
         "client_id": client_id,
@@ -354,12 +376,12 @@ def create_client_json(analysis, url, email=None):
         },
         "discovery": {
             "source": "ai_analysis",
-            "analyzed_at": datetime.now(timezone.utc).isoformat() + 'Z',
+            "analyzed_at": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
             "confidence": analysis.get('confidence_score', 0.0),
             "notes": analysis.get('notes', '')
         },
-        "created_at": datetime.now(timezone.utc).isoformat() + 'Z',
-        "updated_at": datetime.now(timezone.utc).isoformat() + 'Z',
+        "created_at": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+        "updated_at": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         "campaigns": []
     }
 

@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
-from utils import RateLimiter
+from utils import RateLimiter, load_leads, save_json
 
 # Load environment variables
 load_dotenv()
@@ -72,6 +72,50 @@ def normalize_linkedin_url(url):
     return url
 
 
+def _map_api_response_to_lead(lead, result, credits):
+    """Map LinkedIn enrichment API response fields to lead dict. Only overwrites if API returned data."""
+    for field, api_key in [
+        ('linkedin_bio', 'bio'),
+        ('linkedin_headline', 'professional_title'),
+        ('linkedin_company', 'company_name'),
+        ('linkedin_industry', 'company_industry'),
+        ('linkedin_location', 'location'),
+        ('linkedin_tenure_years', 'total_tenure_years'),
+        ('linkedin_followers', 'followers_range'),
+    ]:
+        api_val = result.get(api_key)
+        if api_val:
+            lead[field] = api_val
+        elif field not in lead:
+            lead[field] = ''
+
+    work_exp = result.get('work_experience', [])
+    if work_exp:
+        lead['linkedin_experience'] = [
+            {
+                'title': exp.get('position_title', ''),
+                'company': exp.get('company_name', ''),
+                'period': exp.get('employment_period', '')
+            }
+            for exp in work_exp[:5]
+        ]
+
+    education = result.get('education', [])
+    if education:
+        lead['linkedin_education'] = [
+            {
+                'school': edu.get('institution_name', ''),
+                'degree': edu.get('degree', ''),
+                'period': edu.get('attendance_period', '')
+            }
+            for edu in education[:3]
+        ]
+
+    lead['linkedin_enriched_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    lead['linkedin_enrichment_credits'] = credits
+    return lead
+
+
 def enrich_single_profile(lead, api_key, rate_limiter):
     """
     Enrich a single lead with LinkedIn profile data.
@@ -117,49 +161,14 @@ def enrich_single_profile(lead, api_key, rate_limiter):
                 lead['linkedin_enrichment_error'] = 'not_found'
                 return lead, 'not_found', 0
 
-            # Map response to lead fields
-            lead['linkedin_bio'] = result.get('bio') or ''
-            lead['linkedin_headline'] = result.get('professional_title') or ''
-            lead['linkedin_company'] = result.get('company_name') or ''
-            lead['linkedin_industry'] = result.get('company_industry') or ''
-            lead['linkedin_location'] = result.get('location') or ''
-            lead['linkedin_tenure_years'] = result.get('total_tenure_years') or ''
-            lead['linkedin_followers'] = result.get('followers_range') or ''
-
-            # Map work experience
-            work_exp = result.get('work_experience', [])
-            if work_exp:
-                lead['linkedin_experience'] = [
-                    {
-                        'title': exp.get('position_title', ''),
-                        'company': exp.get('company_name', ''),
-                        'period': exp.get('employment_period', '')
-                    }
-                    for exp in work_exp[:5]  # Keep top 5 positions
-                ]
-
-            # Map education
-            education = result.get('education', [])
-            if education:
-                lead['linkedin_education'] = [
-                    {
-                        'school': edu.get('institution_name', ''),
-                        'degree': edu.get('degree', ''),
-                        'period': edu.get('attendance_period', '')
-                    }
-                    for edu in education[:3]  # Keep top 3
-                ]
-
-            # Metadata
-            lead['linkedin_enriched_at'] = datetime.now(timezone.utc).isoformat() + 'Z'
-            lead['linkedin_enrichment_credits'] = credits
-
+            _map_api_response_to_lead(lead, result, credits)
             return lead, 'success', credits
 
         elif response.status_code == 429:
-            # Rate limited - wait and retry once
-            print(f"Rate limit hit, waiting 60s...")
-            time.sleep(60)
+            # Rate limited - use Retry-After header or default 30s
+            retry_after = int(response.headers.get('Retry-After', 30))
+            print(f"Rate limit hit, waiting {retry_after}s...")
+            time.sleep(retry_after)
 
             response = requests.post(
                 base_url,
@@ -176,17 +185,7 @@ def enrich_single_profile(lead, api_key, rate_limiter):
                     lead['linkedin_enrichment_error'] = 'not_found'
                     return lead, 'not_found', 0
 
-                # Map response (same as above)
-                lead['linkedin_bio'] = result.get('bio') or ''
-                lead['linkedin_headline'] = result.get('professional_title') or ''
-                lead['linkedin_company'] = result.get('company_name') or ''
-                lead['linkedin_industry'] = result.get('company_industry') or ''
-                lead['linkedin_location'] = result.get('location') or ''
-                lead['linkedin_tenure_years'] = result.get('total_tenure_years') or ''
-                lead['linkedin_followers'] = result.get('followers_range') or ''
-                lead['linkedin_enriched_at'] = datetime.now(timezone.utc).isoformat() + 'Z'
-                lead['linkedin_enrichment_credits'] = credits
-
+                _map_api_response_to_lead(lead, result, credits)
                 return lead, 'success', credits
 
             lead['linkedin_enrichment_error'] = 'rate_limited'
@@ -251,26 +250,22 @@ def enrich_linkedin_profiles(leads, api_key, force_regenerate=False, limit=None)
     print(f"Estimated time: ~{len(leads_to_enrich) / RATE_LIMIT:.1f} seconds")
     print()
 
-    # Create lookup map for quick updating
-    lead_map = {id(lead): lead for lead in leads}
-
     rate_limiter = RateLimiter(RATE_LIMIT)
     start_time = time.time()
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         # Submit all enrichment tasks
         future_to_lead = {
-            executor.submit(enrich_single_profile, lead, api_key, rate_limiter): id(lead)
+            executor.submit(enrich_single_profile, lead, api_key, rate_limiter): lead
             for lead in leads_to_enrich
         }
 
         # Process completed tasks
         for future in as_completed(future_to_lead):
-            lead_id = future_to_lead[future]
 
             try:
+                # enrich_single_profile mutates lead in-place
                 updated_lead, status, credits = future.result()
-                lead_map[lead_id] = updated_lead
 
                 with progress_lock:
                     progress_data['processed'] += 1
@@ -331,8 +326,7 @@ def main():
     try:
         # Load leads
         print(f"Loading leads from: {args.input}")
-        with open(args.input, 'r', encoding='utf-8') as f:
-            leads = json.load(f)
+        leads = load_leads(args.input)
 
         if not leads:
             print("No leads to enrich", file=sys.stderr)
@@ -371,8 +365,7 @@ def main():
         filename = f"{args.output_prefix}_{timestamp}_{len(leads)}leads.json"
         filepath = os.path.join(args.output_dir, filename)
 
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(leads, f, indent=2, ensure_ascii=False)
+        save_json(leads, filepath)
 
         print(f"\nEnriched leads saved to: {filepath}")
         print(filepath)  # Print filepath to stdout for caller

@@ -19,13 +19,7 @@ from pathlib import Path
 
 # Add execution/ to path for sibling imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from utils import load_json, save_json
-
-def normalize_key(text):
-    """Normalize text for matching (lowercase, strip whitespace)."""
-    if not text:
-        return ''
-    return str(text).lower().strip()
+from utils import load_json, load_leads, save_json, normalize_key
 
 
 def normalize_linkedin_url(url):
@@ -68,13 +62,17 @@ def load_campaign_leads(campaign_folder):
     if raw_files:
         # Get the most recent raw_leads file
         latest_file = max(raw_files, key=lambda p: p.stat().st_mtime)
-        return load_json(str(latest_file)), latest_file
+        return load_leads(str(latest_file)), latest_file
 
-    # Fallback: look for any JSON file with leads
-    json_files = [f for f in campaign_path.glob('*.json') if 'client.json' not in str(f)]
+    # Fallback: look for any JSON file with leads (exclude backups, reports, scores)
+    json_files = [f for f in campaign_path.glob('*.json')
+                  if 'client.json' not in f.name
+                  and '.backup.' not in f.name
+                  and 'quality_report' not in f.name
+                  and '_scores.' not in f.name]
     if json_files:
         latest_file = max(json_files, key=lambda p: p.stat().st_mtime)
-        return load_json(str(latest_file)), latest_file
+        return load_leads(str(latest_file)), latest_file
 
     return [], None
 
@@ -82,7 +80,8 @@ def load_campaign_leads(campaign_folder):
 def save_campaign_leads(leads, original_file, backup=True):
     """Save deduplicated leads to file, optionally creating backup."""
     if backup and original_file.exists():
-        backup_file = original_file.with_suffix('.backup.json')
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_file = original_file.with_suffix(f'.backup.{timestamp}.json')
         shutil.copy2(original_file, backup_file)
         print(f"  Created backup: {backup_file.name}")
 
@@ -145,6 +144,8 @@ def deduplicate_campaigns(client_id, dry_run=False, campaigns_filter=None):
                     })
             if campaigns:
                 print(f"No campaigns in client.json — discovered {len(campaigns)} from filesystem")
+                # Note: don't persist placeholder metadata to client_data to avoid
+                # overwriting real data in client.json on save
     if not campaigns:
         print(f"No campaigns found for client: {client_id}")
         return 0
@@ -154,7 +155,8 @@ def deduplicate_campaigns(client_id, dry_run=False, campaigns_filter=None):
         campaigns = [c for c in campaigns if c['campaign_id'] in campaigns_filter]
 
     # Sort campaigns by creation date (oldest first)
-    campaigns = sorted(campaigns, key=lambda c: c.get('created_at', ''))
+    # Use '9999' fallback so campaigns without created_at sort LAST, not first
+    campaigns = sorted(campaigns, key=lambda c: c.get('created_at') or '9999')
 
     print(f"\n{'='*70}")
     print(f"Cross-Campaign Deduplication Report")
@@ -175,6 +177,7 @@ def deduplicate_campaigns(client_id, dry_run=False, campaigns_filter=None):
     total_final = 0
 
     # Process each campaign
+    baseline_set = False
     for idx, campaign in enumerate(campaigns, 1):
         campaign_id = campaign['campaign_id']
         campaign_name = campaign['campaign_name']
@@ -205,7 +208,7 @@ def deduplicate_campaigns(client_id, dry_run=False, campaigns_filter=None):
         total_original += current_count
 
         # First campaign is baseline - just add to seen sets
-        if idx == 1:
+        if not baseline_set:
             for lead in leads:
                 email_key, linkedin_key, name_org_key = get_lead_keys(lead)
                 if email_key:
@@ -215,6 +218,7 @@ def deduplicate_campaigns(client_id, dry_run=False, campaigns_filter=None):
                 if name_org_key:
                     seen_name_org.add(name_org_key)
 
+            baseline_set = True
             total_final += current_count
             print(f"  Duplicates removed: 0 (baseline campaign)")
             print(f"  Final leads: {current_count:,}")
@@ -290,7 +294,7 @@ def deduplicate_campaigns(client_id, dry_run=False, campaigns_filter=None):
 
     # Update client.json with new lead counts
     if not dry_run:
-        client_data['updated_at'] = datetime.now(timezone.utc).isoformat() + 'Z'
+        client_data['updated_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         save_json(client_data, str(client_file))
         print(f"[OK] Updated client.json with new lead counts")
         print(f"")

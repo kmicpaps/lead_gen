@@ -38,30 +38,19 @@ def main():
             return 0
 
         # Authenticate
-        creds = None
-        if os.path.exists('token.json'):
-            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-            
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                if os.path.exists('credentials.json'):
-                    flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-                    creds = flow.run_local_server(port=0)
-                    # Save the credentials for the next run
-                    with open('token.json', 'w') as token:
-                        token.write(creds.to_json())
-                else:
-                    print("Warning: credentials.json not found. Saving to CSV instead.")
-                    save_to_csv(leads, args.input)
-                    return 0
+        try:
+            creds = _get_sheets_credentials()
+        except RuntimeError:
+            print("Warning: credentials.json not found. Saving to CSV instead.")
+            save_to_csv(leads, args.input)
+            return 0
 
         try:
             service = build('sheets', 'v4', credentials=creds)
 
             # Determine sheet ID — create new or use existing
-            if args.sheet_id:
+            # mode=create always creates a new sheet, even if --sheet-id is provided
+            if args.sheet_id and args.mode != 'create':
                 spreadsheet_id = args.sheet_id
                 spreadsheet_url = f"https://docs.google.com/spreadsheets/d/{args.sheet_id}/edit"
                 print(f"Using existing Google Sheet: {spreadsheet_url}")
@@ -177,9 +166,11 @@ def _leads_to_values(leads):
     ]
 
     values = [headers]
+    skipped_junk = 0
     for lead in leads:
-        name = lead.get('full_name', '') or lead.get('name', '')
-        if name and any(p in name for p in ['\U0001f440', '\u23f3', '\U0001f4c8', '\U0001f7e2', 'Actor', 'Scanning pages']):
+        name = lead.get('full_name', '') or lead.get('name', '') or ''
+        if name and any(p in name for p in ['\U0001f440', '\u23f3', '\U0001f4c8', '\U0001f7e2', 'Scanning pages']):
+            skipped_junk += 1
             continue
 
         company_name = lead.get('company_name', '')
@@ -232,7 +223,7 @@ def _leads_to_values(leads):
         else:
             education_str = ''
 
-        website_content = lead.get('website_content', '')
+        website_content = lead.get('website_content', '') or ''
         if len(website_content) > 1000:
             website_content = website_content[:1000] + '...'
 
@@ -266,7 +257,10 @@ def _leads_to_values(leads):
             website_content,
             lead.get('source', '')
         ]
-        values.append(row)
+        values.append([v if v is not None else '' for v in row])
+
+    if skipped_junk > 0:
+        print(f"  Skipped {skipped_junk} junk leads (emoji names, scraper artifacts)", file=sys.stderr)
 
     return values
 
@@ -305,12 +299,25 @@ def save_to_csv(leads, input_path):
         'company_website', 'company_linkedin', 'company_phone', 'company_domain',
         'company_country', 'industry', 'company_summary', 'icebreaker', 'source'
     ]
-    
+
+    # Normalize field names: some scraper output uses org_name/website_url instead of company_name/company_website
+    normalized = []
+    for lead in leads:
+        row = dict(lead)
+        if not row.get('company_name'):
+            org = row.get('org_name', '')
+            row['company_name'] = org.get('name', '') if isinstance(org, dict) else str(org)
+        if not row.get('company_website'):
+            row['company_website'] = row.get('website_url', '')
+        if not row.get('company_phone'):
+            row['company_phone'] = row.get('organization_phone', '')
+        normalized.append(row)
+
     with open(csv_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=headers, extrasaction='ignore')
         writer.writeheader()
-        writer.writerows(leads)
-        
+        writer.writerows(normalized)
+
     print(f"Saved leads to local CSV: {csv_path}")
 
 if __name__ == "__main__":

@@ -90,10 +90,10 @@ Analyze this company and provide a structured JSON response:
   },
   "apollo_filter_suggestions": {
     "person_titles": ["CEO", "Founder", "Marketing Director", ...],
-    "person_seniorities": ["Owner", "C-Suite", "VP", "Director", "Manager"],
-    "organization_num_employees_ranges": ["11-20", "21-50", "51-100", "101-200"],
+    "person_seniorities": ["owner", "c_suite", "vp", "director", "manager"],
+    "organization_num_employees_ranges": ["1,10", "11,50", "51,200", "201,500"],
     "organization_locations": ["Latvia", "Lithuania", "Estonia"],
-    "organization_industry_tag_ids": ["Marketing and Advertising", "Information Technology"],
+    "organization_industry_tag_ids": ["Marketing & Advertising", "Information Technology & Services"],
     "keywords": ["digital marketing", "lead generation", ...]
   },
   "confidence_score": 0.85,
@@ -122,8 +122,8 @@ Transform AI output into `client.json` format:
   },
   "apollo_filters": {
     "person_titles": ["Marketing Director", "CMO", "Head of Marketing"],
-    "person_seniorities": ["Director", "VP", "C-Suite", "Owner"],
-    "organization_num_employees_ranges": ["51-100", "101-200", "201-500"],
+    "person_seniorities": ["director", "vp", "c_suite", "owner"],
+    "organization_num_employees_ranges": ["51,200", "201,500"],
     "organization_locations": ["Latvia", "Lithuania", "Estonia"]
   },
   "discovery": {
@@ -240,12 +240,10 @@ After discovery, integrate with existing client workflow:
 py execution/client_discovery.py --url https://newclient.com
 
 # Step 2: Review draft in campaigns/newclient/client_draft.json
-# Make any edits needed
+# Make any edits needed, then rename to client.json
+# (or use: py execution/client_manager.py add — interactive prompt)
 
-# Step 3: Approve and activate
-py execution/client_manager.py approve newclient
-
-# Step 4: Run first campaign
+# Step 3: Run first campaign
 py execution/fast_lead_orchestrator.py --client-id newclient --campaign-name "Initial Outreach" --apollo-url "..."
 ```
 
@@ -254,11 +252,11 @@ py execution/fast_lead_orchestrator.py --client-id newclient --campaign-name "In
 ### Company Size Mapping
 | Discovery Output | Apollo Filter |
 |------------------|---------------|
-| "1-10 employees" | "1-10" |
-| "11-50 employees" | "11-20", "21-50" |
-| "51-200 employees" | "51-100", "101-200" |
-| "201-500 employees" | "201-500" |
-| "500+ employees" | "501-1000", "1001-5000" |
+| "1-10 employees" | "1,10" |
+| "11-50 employees" | "11,50" |
+| "51-200 employees" | "51,200" |
+| "201-500 employees" | "201,500" |
+| "500+ employees" | "501,1000", "1001,5000" |
 
 ### Seniority Mapping
 | Discovery Output | Apollo Seniority |
@@ -271,8 +269,8 @@ py execution/fast_lead_orchestrator.py --client-id newclient --campaign-name "In
 
 ### Industry Mapping
 AI should output Apollo-compatible industry tags:
-- "Marketing and Advertising"
-- "Information Technology and Services"
+- "Marketing & Advertising"
+- "Information Technology & Services"
 - "Computer Software"
 - "Financial Services"
 - "Management Consulting"

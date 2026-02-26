@@ -37,29 +37,47 @@ User picks which scrapers to run **before** scraping starts. All selected scrape
    - Agent presents one section per scraper with full detail, NOT a summary table
    - User sees exactly what each scraper will do before choosing
 
-3. RUN ALL SELECTED SCRAPERS IN PARALLEL
-   - Orchestrator: py execution/fast_lead_orchestrator.py --scrapers <choice>
+3. RUN ALL SELECTED SCRAPERS IN PARALLEL (orchestrator Step 1)
+   - Orchestrator: py execution/fast_lead_orchestrator.py --apollo-url "URL" --target-leads N --client-id CLIENT --campaign-name "CAMPAIGN" --scrapers olympus,codecrafter,peakydev
    - If Olympus cookie fails mid-run, other scrapers continue unaffected
    - Cookie failure is logged as warning, not a blocker
 
-4. Merge & deduplicate (if multiple sources)
+4. Merge & deduplicate (orchestrator Step 2, if multiple sources)
 
-5. Cross-campaign deduplication (if client has existing campaigns)
+5. Cross-campaign deduplication (orchestrator Step 3, if client has existing campaigns)
 
-6. Industry relevance filter (if multi-scraper)
-   - AI-powered industry scoring against Apollo intent
-   - ~20-65% irrelevant lead reduction
+5b. Reference CSV deduplication (orchestrator Step 3.5, optional `--reference-csv`)
+    - Removes leads whose email/LinkedIn already appear in a reference CSV (e.g. cold email export)
+    - Useful for excluding contacts already in an outreach sequence
 
-7. Quality filtering (present report to user, get approval)
-   - --require-email, --require-website, --require-country
-   - --remove-phone-discrepancies, --remove-foreign-tld
+6. Country verification (orchestrator Step 4, verifies leads match target country)
 
-8. [OPTIONAL] AI enrichment (only if user requests)
+7. Quality filtering (orchestrator Step 4.5, auto-applies derived filters)
+   - --require-email, --require-website
+   - --remove-phone-discrepancies, --remove-foreign-tld (if --country set)
+   - --include-industries (derived from Apollo URL)
+   Note: --require-country is NOT used here — country filtering is handled in Step 6 via verify_country.py.
+   Note: AI-powered industry_relevance_filter.py is NOT auto-called by the orchestrator.
+   To use it, run it manually before quality filtering on the merged file.
 
-9. Upload to Google Sheets + update client.json
+8. [OPTIONAL] AI enrichment (orchestrator Step 5, only if user requests)
+
+9. Upload to Google Sheets + update client.json (orchestrator Steps 6-7)
 
 Total time: parallel time of slowest selected scraper + ~2 min post-processing
 ```
+
+### Useful Orchestrator Flags
+
+| Flag | What it does |
+|------|-------------|
+| `--pre-flight-only` | Run pre-flight analysis and exit without scraping |
+| `--skip-quality-filter` | Skip auto-derived quality filtering (Step 4.5) |
+| `--skip-country-verify` | Skip country verification (Step 4) |
+| `--max-leads-mode maximum` | Request max leads from each scraper instead of splitting target |
+| `--sheet-id SHEET_ID` | Update existing Google Sheet instead of creating new |
+| `--sheet-mode create\|append\|replace` | Control Sheet creation behavior |
+| `--reference-csv PATH` | Dedup against external CSV (e.g. cold email export) |
 
 ## Cookie Validation Failure Protocol ⚠️
 
@@ -108,8 +126,8 @@ the scrapers will REFUSE to run (exit code 3) instead of scraping unfiltered.
 
 **Olympus doesn't need this**: It passes the raw Apollo URL directly, so hex IDs work natively.
 
-**Auto-learning**: When Olympus runs first and succeeds, its output can teach us new mappings
-via `learn_from_olympus()`. The pipeline should call this when unresolved IDs exist.
+**Auto-learning**: When Olympus succeeds (in parallel with other scrapers), its output can teach us
+new mappings via `learn_from_olympus()`. The pipeline calls this when unresolved IDs exist.
 
 **Persistent storage**: Learned mappings are saved in `execution/apollo_industry_learned_mappings.json`
 and loaded automatically on every run. Each ID only needs to be mapped once, ever.
@@ -153,7 +171,7 @@ AI enrichment is **expensive and slow**. Make it opt-in:
 **Key insight**: Scrapers already provide validated emails!
 
 - **Olympus**: Returns validated emails from Apollo
-- **Code_crafter**: `email_status: ["validated"]` filter
+- **CodeCrafter**: Hardcodes `email_status: ["validated"]` internally (not a user-facing filter)
 - **Peakydev**: `includeEmails: true` - verified emails only
 
 **Recommendation**: Skip email validation unless:

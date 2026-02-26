@@ -18,6 +18,8 @@ allowed-tools: Read, Grep, Glob
 | `/onboard-new-client` | Create a new client folder with metadata and campaign structure |
 | `/create-sales-sample` | Create a demo deliverable to pitch a prospect |
 | `/cold-email-planning` | Generate cold email sequences using client context and lead data |
+| `/system-audit` | Run a structured codebase audit, log findings, fix issues, generate report |
+| `/maintain` | Quick structural health check — registry, normalizer, directives, skills, scripts |
 
 ## Decision Tree
 
@@ -38,6 +40,10 @@ allowed-tools: Read, Grep, Glob
 
 **"I need email copy for outreach"**
 → `/cold-email-planning`
+
+**"I want to audit or maintain the system"**
+→ Quick check after changes? → `/maintain`
+→ Deep bug-finding audit? → `/system-audit`
 
 ## Not a Slash Command (use PROMPTS.md templates)
 

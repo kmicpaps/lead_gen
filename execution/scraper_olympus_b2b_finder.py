@@ -82,11 +82,6 @@ def detect_country_from_url(apollo_url):
                 if country_name in location:
                     return code
 
-        # If Nordic/Baltic countries mentioned but no exact match, default to SE
-        nordic_baltic = ['sweden', 'norway', 'finland', 'denmark', 'estonia', 'lithuania', 'latvia']
-        if any(nb in ' '.join(locations) for nb in nordic_baltic):
-            return 'SE'
-
         return 'US'  # Final fallback
     except Exception:
         return 'US'
@@ -191,7 +186,7 @@ def main():
 
         # Find APOLLO_COOKIE=[...] in the file
         # Match from APOLLO_COOKIE=[ to the last ] on its own line
-        match = re.search(r'(?:^|\n)APOLLO_COOKIE=(\[.*?\n\])', env_content, re.DOTALL | re.MULTILINE)
+        match = re.search(r'(?:^|\n)APOLLO_COOKIE=(\[.*?\])', env_content, re.DOTALL | re.MULTILINE)
         if match:
             apollo_cookie_str = match.group(1)
 
@@ -236,7 +231,8 @@ def main():
 
         print(f"Starting Apify B2B Leads Finder Scraper...")
         print(f"Target leads: {args.max_leads}")
-        print(f"Apollo URL: {normalized_url[:100]}..." if len(normalized_url) > 100 else normalized_url)
+        url_display = f"{normalized_url[:100]}..." if len(normalized_url) > 100 else normalized_url
+        print(f"Apollo URL: {url_display}")
         print(f"Country: {country} (auto-detected)" if not args.country else f"Country: {country}")
 
         # Initialize Apify client
@@ -260,10 +256,8 @@ def main():
 
         # Save run ID for recovery (if local process is killed, Apify run continues)
         run_id_file = Path(args.output_dir) / '.active_run.json'
-        run_id_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(run_id_file, 'w', encoding='utf-8') as _f:
-            json.dump({'run_id': run_id, 'actor': 'olympus/b2b-leads-finder',
-                       'started_at': datetime.now().isoformat()}, _f)
+        save_json({'run_id': run_id, 'actor': 'olympus/b2b-leads-finder',
+                   'started_at': datetime.now().isoformat()}, str(run_id_file), mkdir=True)
         print(f"Run ID saved to: {run_id_file}")
 
         # Wait for the actor to finish

@@ -19,7 +19,6 @@ Output:
 
 import sys
 import os
-import json
 import re
 import argparse
 from collections import Counter
@@ -27,50 +26,24 @@ from datetime import datetime
 
 # Add parent dir so we can import sibling modules
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from utils import load_leads, save_json
 from apollo_url_parser import parse_apollo_url
+try:
+    from lead_filter import COUNTRY_PHONE_CODES
+    _KNOWN_PHONE_PREFIXES = set(COUNTRY_PHONE_CODES.values())
+except ImportError:
+    _KNOWN_PHONE_PREFIXES = set()
 
 
 # ---------------------------------------------------------------------------
-# Apollo industry ID -> human-readable name mapping (common IDs)
+# Apollo industry ID -> human-readable name: use authoritative resolver (146 verified mappings)
 # ---------------------------------------------------------------------------
-APOLLO_INDUSTRY_MAP = {
-    "5567cd4773696439b10b0000": "Information Technology & Services",
-    "5567cd4773696439b11c0000": "Marketing & Advertising",
-    "5567cd4773696439b1220000": "Management Consulting",
-    "5567cd4773696439b1050000": "Financial Services",
-    "5567cd4773696439b1630000": "Banking",
-    "5567cd4773696439b1190000": "Insurance",
-    "5567cd4773696439b10e0000": "Hospital & Health Care",
-    "5567cd4773696439b1380000": "Retail",
-    "5567cd4773696439b1180000": "Real Estate",
-    "5567cd4773696439b1130000": "Construction",
-    "5567cd4773696439b12c0000": "Education Management",
-    "5567cd4773696439b1170000": "Human Resources",
-    "5567cd4773696439b1590000": "Professional Training & Coaching",
-    "5567cd4773696439b1110000": "Telecommunications",
-    "5567cd4773696439b14d0000": "Food & Beverages",
-    "5567cd4773696439b1370000": "Accounting",
-    "5567cd4773696439b12e0000": "Legal Services",
-    "5567cd4773696439b1070000": "Computer Software",
-    "5567cd4773696439b1270000": "Staffing & Recruiting",
-    "5567cd4773696439b15c0000": "Logistics & Supply Chain",
-    "5567cd4773696439b1240000": "Transportation/Trucking/Railroad",
-    "5567cd4773696439b1060000": "Internet",
-    "5567cd4773696439b1570000": "Automotive",
-}
-
-
-def resolve_industry_ids(industry_ids):
-    """Convert Apollo industry tag IDs to human-readable names where possible."""
-    resolved = []
-    unresolved = []
-    for iid in industry_ids:
-        name = APOLLO_INDUSTRY_MAP.get(iid)
-        if name:
-            resolved.append(name)
-        else:
-            unresolved.append(iid)
-    return resolved, unresolved
+try:
+    from apollo_industry_resolver import resolve_industry_ids
+except ImportError:
+    def resolve_industry_ids(industry_ids):
+        """Fallback: return all IDs as unresolved if resolver unavailable."""
+        return [], list(industry_ids)
 
 
 def describe_apollo_filters(filters):
@@ -100,8 +73,10 @@ def describe_apollo_filters(filters):
     if filters.get("org_locations"):
         lines.append(f"  Org locations: {', '.join(filters['org_locations'])}")
 
-    # Industries
-    if filters.get("industries"):
+    # Industries — prefer pre-resolved names, fall back to local resolver
+    if filters.get("industries_resolved"):
+        lines.append(f"  Industries: {', '.join(filters['industries_resolved'])}")
+    elif filters.get("industries"):
         resolved, unresolved = resolve_industry_ids(filters["industries"])
         if resolved:
             lines.append(f"  Industries: {', '.join(resolved)}")
@@ -159,12 +134,20 @@ def analyze_leads(leads, filters):
         phone = l.get("company_phone") or l.get("phone") or l.get("organization_phone") or ""
         phone = str(phone).strip()
         if phone.startswith("+"):
-            # Extract country code (first 1-3 digits after +)
-            m = re.match(r"\+(\d{1,3})", phone)
-            if m:
-                phone_codes[f"+{m.group(1)}"] += 1
-            else:
-                phone_codes["other"] += 1
+            # Extract country code using known-prefix longest match
+            digits = phone[1:]
+            matched = None
+            if _KNOWN_PHONE_PREFIXES:
+                for plen in (3, 2, 1):
+                    if len(digits) >= plen:
+                        candidate = f"+{digits[:plen]}"
+                        if candidate in _KNOWN_PHONE_PREFIXES:
+                            matched = candidate
+                            break
+            if not matched:
+                # Fallback: take first 2 digits (most common code length)
+                matched = f"+{digits[:min(2, len(digits))]}" if digits else "other"
+            phone_codes[matched] += 1
         elif phone:
             phone_codes["no_code"] += 1
 
@@ -184,6 +167,12 @@ def analyze_leads(leads, filters):
     }
 
     # Detect expected country from Apollo filters
+    # Use word-boundary-safe matching to avoid "nz" matching "Linz", "uk" matching "Vanusku"
+    import re
+    def _country_word_match(pattern, text):
+        """Match country abbreviation as a whole word or after comma/space."""
+        return bool(re.search(r'(?:^|[\s,])' + pattern + r'(?:$|[\s,])', text))
+
     expected_countries = []
     for loc in filters.get("locations", []) + filters.get("org_locations", []):
         loc_lower = loc.lower()
@@ -199,11 +188,11 @@ def analyze_leads(leads, filters):
             expected_countries.append(("Germany", "+49"))
         elif "austria" in loc_lower:
             expected_countries.append(("Austria", "+43"))
-        elif "new zealand" in loc_lower or "nz" in loc_lower:
+        elif "new zealand" in loc_lower or _country_word_match("nz", loc_lower):
             expected_countries.append(("New Zealand", "+64"))
-        elif "united states" in loc_lower or "usa" in loc_lower:
+        elif "united states" in loc_lower or _country_word_match("usa?", loc_lower):
             expected_countries.append(("United States", "+1"))
-        elif "united kingdom" in loc_lower or "uk" in loc_lower:
+        elif "united kingdom" in loc_lower or _country_word_match("uk", loc_lower):
             expected_countries.append(("United Kingdom", "+44"))
     analysis["expected_countries"] = expected_countries
 
@@ -271,7 +260,7 @@ def analyze_leads(leads, filters):
     }
 
     # --- Organization analysis ---
-    orgs = Counter(l.get("company_name") or l.get("organization_name") or l.get("org_name") or "EMPTY" for l in leads)
+    orgs = Counter(str(l.get("company_name") or l.get("organization_name") or l.get("org_name") or "EMPTY") for l in leads)
     analysis["organizations"] = {
         "unique_count": len(orgs),
         "top_10": dict(orgs.most_common(10)),
@@ -447,9 +436,8 @@ def main():
     # Parse Apollo URL
     filters = parse_apollo_url(args.apollo_url)
 
-    # Load leads
-    with open(args.leads, "r", encoding="utf-8") as f:
-        leads = json.load(f)
+    # Load leads (validates data is a list)
+    leads = load_leads(args.leads)
 
     # Analyze
     analysis = analyze_leads(leads, filters)
@@ -469,8 +457,7 @@ def main():
             "filter_description": describe_apollo_filters(filters),
             "analysis": analysis,
         }
-        with open(report_path, "w", encoding="utf-8") as f:
-            json.dump(report_data, f, indent=2, ensure_ascii=False)
+        save_json(report_data, report_path)
         print(f"\nJSON report saved: {report_path}")
 
     return 0

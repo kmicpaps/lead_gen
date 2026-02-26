@@ -178,22 +178,18 @@ def translate_insight(insight_en: str, lead: dict) -> str:
         m = re.search(pattern["match"], insight_en, re.IGNORECASE)
         if m:
             template = pattern["template_lv"]
-            # Fill in values from regex groups and lead data
-            lcp = lead.get("lcp_seconds", "")
-            perf = lead.get("performance_score", "")
-            seo = lead.get("seo_score", "")
-            cms = lead.get("cms", "")
-            overall = lead.get("overall_score", "")
-            # Try to extract from regex groups too
+            # Fill in values from regex groups (contextual) and lead data (fallback)
             groups = m.groups()
-            result = template.format(
-                casual_name=casual_name,
-                lcp=groups[0] if groups else lcp,
-                perf=groups[0] if groups else perf,
-                seo=groups[0] if groups else seo,
-                cms=groups[0] if len(groups) > 0 else cms,
-                score=groups[1] if len(groups) > 1 else overall,
-            )
+            # Use named dict so each template placeholder gets the right value
+            fmt = {
+                "casual_name": casual_name,
+                "lcp": groups[0] if groups and "lcp" in template else lead.get("lcp_seconds", ""),
+                "perf": groups[0] if groups and "perf" in template else lead.get("performance_score", ""),
+                "seo": groups[0] if groups and "seo" in template else lead.get("seo_score", ""),
+                "cms": groups[0] if groups and "cms" in template else lead.get("cms", ""),
+                "score": groups[1] if len(groups) > 1 else (groups[0] if groups and "score" in template else lead.get("overall_score", "")),
+            }
+            result = template.format(**fmt)
             return result
     return FALLBACK_INSIGHT_LV.format(casual_name=casual_name)
 

@@ -11,8 +11,8 @@ Filters available:
   --require-country NAME  Keep only leads matching this country (e.g. Italy)
   --remove-phone-discrepancies  Remove leads where phone prefix doesn't match country
   --exclude-titles FILE   JSON file with title exclusion regex patterns
-  --exclude-industries LIST  Comma-separated industry names to exclude
-  --include-industries LIST  Comma-separated industry whitelist (keep only matching)
+  --exclude-industries LIST  Pipe-separated industry names to exclude
+  --include-industries LIST  Pipe-separated industry whitelist (keep only matching)
   --exclude-titles-builtin   Use built-in IC exclusion patterns (default set)
 
 Usage:
@@ -22,8 +22,8 @@ Usage:
         --require-email \
         --require-phone +371 \
         --exclude-titles-builtin \
-        --exclude-industries "Farming,Gambling & Casinos" \
-        --include-industries "Retail,Construction,Plastics"
+        --exclude-industries "Farming|Gambling & Casinos" \
+        --include-industries "Retail|Construction|Glass, Ceramics & Concrete"
 
 Output:
     Saves filtered leads JSON + prints summary of what was removed at each stage.
@@ -37,7 +37,7 @@ from collections import Counter
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from utils import load_json, save_json
+from utils import load_json, load_leads, save_json
 
 
 # ---------------------------------------------------------------------------
@@ -57,8 +57,8 @@ BUILTIN_TITLE_EXCLUDE_PATTERNS = [
     r"\bqa\b",
     r"\btester\b",
     r"\btest engineer\b",
-    r"\bdesigner\b(?!.*director)",
-    r"\barchitect\b(?!.*chief)",
+    r"^(?!.*\b(?:director)\b).*\bdesigner\b",
+    r"^(?!.*\b(?:chief)\b).*\barchitect\b",
     r"\bfrontend\b",
     r"\bbackend\b",
     r"\bfull.?stack\b",
@@ -67,33 +67,29 @@ BUILTIN_TITLE_EXCLUDE_PATTERNS = [
     r"\bdba\b",
     r"\bdatabase administrator\b",
     # Individual contributors - business
-    r"\bconsultant\b(?!.*senior|.*managing|.*principal)",
-    r"\bsenior consultant\b",
-    r"\banalyst\b(?!.*lead|.*head|.*chief|.*director)",
-    r"\bspecialist\b(?!.*lead|.*head|.*chief)",
+    r"^(?!.*\b(?:senior|managing|principal)\b).*\bconsultant\b",
+    r"^(?!.*\b(?:lead|head|chief|director)\b).*\banalyst\b",
+    r"^(?!.*\b(?:lead|head|chief)\b).*\bspecialist\b",
     r"\bcoordinator\b",
-    r"\bexpert\b(?!.*chief|.*lead|.*head)",
-    r"\bsenior expert\b",
+    r"^(?!.*\b(?:chief|lead|head)\b).*\bexpert\b",
     r"\bresearcher\b",
-    r"\bsenior researcher\b",
     r"\bjunior\b",
     r"\bintern\b",
     r"\btrainee\b",
-    r"\bassistant\b(?!.*director|.*manager)",
+    r"^(?!.*\b(?:director|manager)\b).*\bassistant\b",
     # Admin / clerical
-    r"\badministrator\b(?!.*director|.*manager)",
+    r"^(?!.*\b(?:director|manager)\b).*\badministrator\b",
     r"\bsecretary\b",
     r"\breceptionist\b",
     r"\bclerk\b",
     # Finance individual contributors
-    r"\baccountant\b(?!.*chief|.*head)",
-    r"\bauditor\b(?!.*chief|.*head|.*lead)",
+    r"^(?!.*\b(?:chief|head)\b).*\baccountant\b",
+    r"^(?!.*\b(?:chief|head|lead)\b).*\bauditor\b",
     r"\bbookkeeper\b",
     # Legal individual contributors
-    r"\blawyer\b(?!.*managing|.*senior partner)",
-    r"\bsenior lawyer\b",
+    r"^(?!.*\b(?:managing|senior partner)\b).*\blawyer\b",
     r"\blegal advisor\b",
-    r"\blegal counsel\b(?!.*general|.*chief)",
+    r"^(?!.*\b(?:general|chief)\b).*\blegal counsel\b",
     # Irrelevant manager roles (too niche / technical)
     r"\bit manager\b",
     r"\bsystem.* manager\b",
@@ -111,7 +107,7 @@ BUILTIN_TITLE_EXCLUDE_PATTERNS = [
 def title_passes(title, patterns):
     """Return True if the title should be KEPT (not excluded)."""
     if not title:
-        return False
+        return True  # Keep leads with no title — can't determine relevance
     t = title.lower().strip()
     for pat in patterns:
         if re.search(pat, t):
@@ -256,14 +252,15 @@ def apply_filters(leads, args):
 
     # Stage 4: Industry inclusion whitelist
     if args.include_industries:
-        include_set = {_normalize_industry(ind) for ind in args.include_industries.split(",")}
+        # Split on | (pipe) to support industry names containing commas (e.g. "Glass, Ceramics & Concrete")
+        include_set = {_normalize_industry(ind) for ind in args.include_industries.split("|")}
         before = len(current)
         passed = []
         failed = []
         for l in current:
             industry = _get_lead_industry(l)
             if not industry:
-                passed.append(l)  # Keep leads with no industry (can't filter)
+                failed.append(l)  # Exclude leads with no industry when whitelist is active
             elif _normalize_industry(industry) in include_set:
                 passed.append(l)
             else:
@@ -281,7 +278,7 @@ def apply_filters(leads, args):
 
     # Stage 5: Industry exclusion
     if args.exclude_industries:
-        exclude_set = {_normalize_industry(ind) for ind in args.exclude_industries.split(",")}
+        exclude_set = {_normalize_industry(ind) for ind in args.exclude_industries.split("|")}
         before = len(current)
         passed = [
             l for l in current
@@ -349,8 +346,7 @@ def apply_filters(leads, args):
                     failed.append(l)
                 else:
                     passed.append(l)
-            from collections import Counter as _Counter
-            removed_tlds = _Counter(get_domain_tld((l.get('company_domain') or '').lower()) for l in failed)
+            removed_tlds = Counter(get_domain_tld((l.get('company_domain') or '').lower()) for l in failed)
             current = passed
             stages.append({
                 "name": f"Foreign TLD filter ({args.remove_foreign_tld.upper()})",
@@ -460,9 +456,9 @@ def main():
     parser.add_argument("--exclude-titles", type=str,
                         help="Path to JSON file with custom title exclusion regex patterns")
     parser.add_argument("--include-industries", type=str,
-                        help="Comma-separated industry whitelist (keep only matching; leads with no industry are kept)")
+                        help="Pipe-separated industry whitelist (e.g. 'Retail|Construction|Glass, Ceramics & Concrete')")
     parser.add_argument("--exclude-industries", type=str,
-                        help="Comma-separated industry names to exclude")
+                        help="Pipe-separated industry names to exclude (e.g. 'Farming|Gambling & Casinos')")
     parser.add_argument("--require-country", type=str,
                         help="Keep only leads matching this country (e.g. Italy)")
     parser.add_argument("--remove-phone-discrepancies", action="store_true",
@@ -476,8 +472,8 @@ def main():
 
     args = parser.parse_args()
 
-    # Load leads
-    leads = load_json(args.input)
+    # Load leads (validates that data is a list)
+    leads = load_leads(args.input)
     print(f"Loaded {len(leads)} leads from {args.input}")
 
     # Check that at least one filter is specified

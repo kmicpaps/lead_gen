@@ -12,8 +12,8 @@ After scraping and deduplicating leads, the raw list often contains leads that d
 
 Run this workflow **after** the scraping + deduplication steps from `lead_generation_v5_optimized.md` are complete, and **before** the final Google Sheets export.
 
-Specifically, insert this between:
-- Step 5 (cross-campaign deduplication) → **THIS WORKFLOW** → Step 8 (upload to Google Sheets)
+Specifically, this is **Step 7** in the V8 pipeline:
+- Step 5 (cross-campaign dedup) → Step 6 (country verification) → **Step 7: THIS WORKFLOW** → Step 8 (AI enrichment) → Step 9 (upload to Google Sheets)
 
 ## Workflow
 
@@ -69,7 +69,7 @@ py execution/lead_filter.py \
     --require-email \
     --require-phone +371 \
     --exclude-titles-builtin \
-    --exclude-industries "Farming,Gambling & Casinos"
+    --exclude-industries "Farming|Gambling & Casinos"
 ```
 
 #### Filter flags reference:
@@ -80,10 +80,10 @@ py execution/lead_filter.py \
 | `--require-phone CODE` | Keeps only leads with a phone matching the country code (e.g. `+371`) |
 | `--require-country NAME` | Keeps only leads matching this country (e.g. `Italy`). Case-insensitive. Checks both `country` and `company_country` fields. |
 | `--remove-phone-discrepancies` | Removes leads where phone prefix doesn't match lead country. Leads without phone are kept. Uses built-in mapping of 45 countries. |
-| `--include-industries LIST` | Comma-separated industry whitelist. Keeps only leads whose industry matches (case-insensitive, `and`/`&` normalized). Leads with no industry field are kept. |
+| `--include-industries LIST` | Pipe-separated (`|`) industry whitelist. Keeps only leads whose industry matches (case-insensitive, `and`/`&` normalized). Leads with no industry field are kept. Use pipe because industry names can contain commas (e.g. "Glass, Ceramics & Concrete"). |
 | `--exclude-titles-builtin` | Excludes individual contributors using the built-in pattern set (engineers, analysts, coordinators, etc.). Keeps all managers, directors, heads, VPs, C-level, owners. |
 | `--exclude-titles FILE` | Custom regex patterns from a JSON file (list of regex strings). Use when the built-in set needs augmenting for a specific campaign. |
-| `--exclude-industries LIST` | Comma-separated industry names to exclude. Case-insensitive. |
+| `--exclude-industries LIST` | Pipe-separated (`|`) industry names to exclude. Case-insensitive. |
 | `--output-prefix PREFIX` | Change output filename prefix (default: `filtered`) |
 
 ### Step 4: Review Filter Results
@@ -104,7 +104,7 @@ Once the user approves the filtered results:
 
 The `--exclude-titles-builtin` flag uses an exclude-only approach:
 - **Everything passes UNLESS it matches an exclusion pattern**
-- Leads with no title are excluded (no title = can't verify relevance)
+- Leads with no title are kept (can't determine relevance, so err on inclusion)
 
 ### What gets EXCLUDED (individual contributors + irrelevant roles):
 
@@ -134,7 +134,7 @@ For campaigns where the built-in set doesn't fit, create a JSON file with custom
 [
     "\\bteacher\\b",
     "\\bprofessor\\b",
-    "\\bnurse\\b(?!.*manager)",
+    "^(?!.*\\b(?:manager)\\b).*\\bnurse\\b",
     "\\bdriver\\b"
 ]
 ```
@@ -192,7 +192,7 @@ If you know the exact industries to keep, use the `--include-industries` flag in
 py execution/lead_filter.py \
     --input .tmp/merged/merged_leads_XXXXX.json \
     --output-dir .tmp/filtered/ \
-    --include-industries "Retail,Construction,Building Materials,Plastics,Wholesale"
+    --include-industries "Retail|Construction|Building Materials|Plastics|Wholesale"
 ```
 
 ### When to use which:
@@ -204,8 +204,8 @@ py execution/lead_filter.py \
 - **PeakyDev scraper** often returns leads without email for contacts beyond its verified set. Filter with `--require-email` to clean these out.
 - **CodeCrafter with broad org keywords** (e.g. top500 searches) may have low match rates (3-5%). This is expected — the org keyword filter is loose by design.
 - **Industry data** comes from the scrapers, not from Apollo filters. Coverage is usually 95-99%. Leads with empty industry are kept by default (could be relevant companies without classification).
-- **Phone codes** — the script checks `phone`, `organization_phone`, and `personal_phone` fields. A match on any of these passes the filter.
-- **Title patterns use negative lookahead** — e.g. `\bdesigner\b(?!.*director)` excludes "Designer" but keeps "Design Director". Be careful when adding patterns to preserve these.
+- **Phone codes** — the script checks `company_phone` (primary, set by normalizer), with fallbacks to `phone` and `organization_phone` for un-normalized leads. A match on any of these passes the filter.
+- **Title patterns use full-title negative lookahead** — e.g. `^(?!.*\b(?:director)\b).*\bdesigner\b` excludes "Designer" but keeps "Design Director". The `^` anchor ensures the qualifier check scans the entire title. Be careful when adding patterns to preserve this structure.
 
 ## Decision: Filter Order
 
@@ -216,7 +216,9 @@ Filters are applied in this fixed order for consistency:
 4. Industry inclusion whitelist (if specified)
 5. Industry exclusion
 6. Country requirement
-7. Phone/country discrepancy removal
+7. Website requirement (`--require-website`)
+8. Foreign TLD removal (`--remove-foreign-tld`)
+9. Phone/country discrepancy removal
 
 This order ensures that expensive regex matching (titles) runs on a smaller set, and country/phone checks run last since they depend on enrichment data that may be added in earlier pipeline steps.
 

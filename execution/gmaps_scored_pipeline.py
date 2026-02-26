@@ -55,7 +55,7 @@ COLD_EMAIL_HEADERS = [
     "facebook", "instagram", "linkedin",
     "google_maps_url", "rating", "review_count",
     "overall_score", "performance_score", "seo_score",
-    "mobile_friendly", "has_ssl", "cms",
+    "is_mobile_friendly", "has_ssl", "cms",
     "insight_1", "insight_2", "insight_3",
 ]
 
@@ -154,7 +154,7 @@ def _safe_tab_name(name: str) -> str:
     return "".join(c for c in safe if c.isalnum() or c in " _-")
 
 
-def export_to_sheets(gc, sheet_url, cold_calling, cold_email, all_leads, niches_used):
+def export_to_sheets(gc, sheet_url, cold_calling, cold_email, all_leads, niches_used, total_scraped=None):
     """Export both streams + per-niche email tabs to Google Sheets."""
     spreadsheet = gc.open_by_url(sheet_url)
     print(f"\n[SHEETS] Opened: {spreadsheet.title}")
@@ -170,9 +170,10 @@ def export_to_sheets(gc, sheet_url, cold_calling, cold_email, all_leads, niches_
 
     keep_tabs = PIPELINE_TABS | niche_tab_names
 
-    # Delete stale tabs (old V1 niche tabs, etc.) — but keep Sheet1 if it's the only one
+    # Delete stale tabs (old V1 niche tabs, etc.) — but keep Sheet1 and any user-added tabs
+    # Only delete tabs that look like old pipeline niche tabs (prefixed with "email_")
     for tab_name, ws in existing_tabs.items():
-        if tab_name not in keep_tabs and tab_name != "Sheet1":
+        if tab_name not in keep_tabs and tab_name != "Sheet1" and tab_name.startswith("email_"):
             try:
                 spreadsheet.del_worksheet(ws)
                 print(f"[CLEANUP] Deleted stale tab: '{tab_name}'")
@@ -189,7 +190,12 @@ def export_to_sheets(gc, sheet_url, cold_calling, cold_email, all_leads, niches_
         else:
             ws = spreadsheet.add_worksheet(title=name, rows=2000, cols=len(headers))
         ws.append_row(headers)
-        ws.format(f'A1:{chr(64+len(headers))}1', {
+        n = len(headers)
+        if n <= 26:
+            col_letter = chr(64 + n)
+        else:
+            col_letter = chr(64 + (n - 1) // 26) + chr(65 + (n - 1) % 26)
+        ws.format(f'A1:{col_letter}1', {
             'textFormat': {'bold': True},
             'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}
         })
@@ -244,7 +250,7 @@ def export_to_sheets(gc, sheet_url, cold_calling, cold_email, all_leads, niches_
     summary_rows = [
         ["Generated", datetime.now().strftime("%Y-%m-%d %H:%M")],
         ["Niches", ", ".join(niches_used)],
-        ["Total scraped", str(len(all_leads))],
+        ["Total scraped", str(total_scraped if total_scraped is not None else len(all_leads))],
         ["After dedup", str(len(all_leads))],
         ["Cold calling (phone only)", str(len(cold_calling))],
         ["Cold email (has email)", str(len(cold_email))],
@@ -459,7 +465,7 @@ def main():
         sheet_url = export_to_sheets(
             gc, args.sheet_url,
             cold_calling, cold_email, all_leads,
-            list(niches.keys())
+            list(niches.keys()), total_scraped=before_dedup
         )
         print(f"\nSheet URL: {sheet_url}")
     else:
@@ -469,7 +475,7 @@ def main():
     print(f"\n{'='*70}")
     print("PIPELINE COMPLETE")
     print(f"{'='*70}")
-    print(f"Total scraped:     {len(all_leads)}")
+    print(f"Total scraped:     {before_dedup}")
     print(f"Cold calling:      {len(cold_calling)}")
     print(f"Cold email:        {len(cold_email)}")
     print(f"No contact:        {split_result['no_contact']['count']}")

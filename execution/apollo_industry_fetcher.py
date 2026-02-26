@@ -43,7 +43,7 @@ def load_apollo_cookies():
         print("Error: .env file not found", file=sys.stderr)
         return None
 
-    match = re.search(r'(?:^|\n)APOLLO_COOKIE=(\[.*?\n\])', env_content, re.DOTALL | re.MULTILINE)
+    match = re.search(r'(?:^|\n)APOLLO_COOKIE=(\[.*?\])', env_content, re.DOTALL | re.MULTILINE)
     if not match:
         print("Error: APOLLO_COOKIE not found in .env", file=sys.stderr)
         return None
@@ -284,9 +284,10 @@ def fetch_from_apollo(cookies, dry_run=False):
     all_mappings = {}
 
     for ep in endpoints:
-        desc = ep.pop('desc')
-        method = ep.pop('method')
-        url = ep.pop('url')
+        desc = ep['desc']
+        method = ep['method']
+        url = ep['url']
+        ep = {k: v for k, v in ep.items() if k not in ('desc', 'method', 'url')}
 
         print(f"\nTrying: {desc}")
         try:

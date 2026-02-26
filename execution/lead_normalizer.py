@@ -97,12 +97,18 @@ def normalize_olympus(lead: Dict[str, Any]) -> Dict[str, Any]:
         normalized['company_domain'] = org.get('primary_domain', '')
         normalized['company_country'] = ''  # Filled by Lead Magic enrichment later
 
-        # Industry from NAICS/SIC codes (would need conversion, for now just take as is)
+        # Industry from NAICS/SIC codes — extract text description if available
         industry = ''
-        if org.get('naics_codes'):
-            industry = str(org.get('naics_codes'))
-        elif org.get('sic_codes'):
-            industry = str(org.get('sic_codes'))
+        if org.get('naics_codes') and isinstance(org['naics_codes'], list):
+            for code in org['naics_codes']:
+                if isinstance(code, dict) and code.get('naics_description'):
+                    industry = code['naics_description']
+                    break
+        if not industry and org.get('sic_codes') and isinstance(org['sic_codes'], list):
+            for code in org['sic_codes']:
+                if isinstance(code, dict) and code.get('sic_description'):
+                    industry = code['sic_description']
+                    break
         normalized['industry'] = industry
     else:
         # No organization data
@@ -250,7 +256,7 @@ def normalize_pre_normalized(lead: Dict[str, Any], source: str) -> Dict[str, Any
         'company_name': lead.get('org_name', ''),  # Pre-normalized uses org_name
         'company_website': lead.get('website_url', ''),
         'company_linkedin': lead.get('company_linkedin', ''),
-        'company_phone': lead.get('organization_phone', ''),
+        'company_phone': lead.get('company_phone', '') or lead.get('organization_phone', ''),
         'company_domain': lead.get('company_domain', ''),
         'company_country': lead.get('company_country', ''),  # Preserve if already set
         'industry': lead.get('industry', ''),
@@ -280,10 +286,10 @@ def normalize_lead(lead: Dict[str, Any], source: str, fix_diacritics: bool = Tru
         return None
 
     # Check if already pre-normalized (some scrapers do this)
+    source = source.lower()
     if is_pre_normalized(lead):
         normalized = normalize_pre_normalized(lead, source)
     else:
-        source = source.lower()
         if source == 'olympus':
             normalized = normalize_olympus(lead)
         elif source == 'codecrafter':

@@ -48,7 +48,44 @@ Errors are learning opportunities. When something breaks:
 2. Update the tool
 3. Test tool, make sure it works
 4. Update directive to include new flow
-5. System is now stronger
+5. Log the change (see Documentation Protocol below)
+6. System is now stronger
+
+## Change Protocol
+
+Before modifying execution scripts, directives, or skills:
+1. Read the relevant directive for the workflow you're modifying
+2. Check `directives/coding_standards.md` for the applicable integration checklist
+3. Identify all files that need coordinated updates (use the "When to Update What" table)
+
+After making changes:
+1. Verify against the coding standards checklist
+2. Run `py execution/system_health_check.py` to catch structural drift
+3. Log the change (see Documentation Protocol below)
+4. Update the directive if behavior changed
+5. Update MEMORY.md if significant (new capability, architecture change)
+
+## Documentation Protocol
+
+The self-annealing loop says "update the directive" — this section specifies what else to update. Full SOP: `directives/system_maintenance.md`.
+
+**After fixing bugs** (any workflow):
+- Run `py execution/changelog_manager.py add --type fix --severity LEVEL --summary "..." --files changed_file.py`
+- If found during an audit, also close the finding: `py execution/audit_logger.py fix --finding ID --description "..."`
+
+**After completing feature work:**
+- Run `py execution/changelog_manager.py add --type feature --summary "..." --files file1.py file2.py`
+- Update MEMORY.md with a compressed summary (2-5 lines)
+- If 5+ files changed, create `docs/CONTEXT_{feature_name}.md`
+
+**After completing audits:**
+- Run `py execution/audit_logger.py report --audit AUDIT_ID`
+- Update MEMORY.md with compressed audit results (3-5 lines)
+
+**After updating directives:**
+- Run `py execution/changelog_manager.py add --type directive --summary "..." --files directives/name.md`
+
+**What NOT to log:** routine campaign runs, client data operations, conversations that don't change code/docs.
 
 ## File Organization
 
@@ -108,12 +145,12 @@ Active SOPs only. Historical summaries and superseded versions go in `directives
 
 ### Cookie Validation Failures
 
-When any scraper reports cookie/session validation failures:
+When Olympus scraper reports cookie/session validation failures during a pipeline run:
 
 1. **IMMEDIATELY NOTIFY THE USER** - Don't silently fail over
-2. **STOP THE WORKFLOW** - Don't continue with degraded scrapers
-3. **ASK FOR ACTION** - Prompt user to refresh cookies
-4. **WAIT FOR CONFIRMATION** - Don't proceed until user confirms
+2. **Other scrapers continue** - V8 pipeline runs scrapers in parallel, so Olympus failure does NOT block backup scrapers
+3. **ASK FOR ACTION** - Prompt user to refresh cookies for future runs
+4. **Report degraded results** - Make clear that Olympus leads are missing from this run
 
 **Detection signals**:
 - Exit code 2 from Olympus scraper
@@ -125,15 +162,13 @@ When any scraper reports cookie/session validation failures:
 ⚠️  COOKIE VALIDATION FAILED
 
 The Apollo session cookie has expired.
+Olympus returned 0 leads — backup scrapers (CodeCrafter/PeakyDev) continued normally.
 
-I can either:
-A) Wait while you refresh cookies (recommended - 2 minutes)
-B) Continue with backup scrapers (lower quality, may miss leads)
-
-Which would you prefer?
+Results are available but may be lower quality without Olympus data.
+Please refresh cookies before the next run: https://app.apollo.io → DevTools → Copy cookie
 ```
 
-**Why this matters**: Olympus provides highest quality leads from Apollo. Never silently downgrade data sources without user consent.
+**Why this matters**: Olympus provides highest quality leads from Apollo. Notify the user so they can refresh cookies for future runs, but don't discard valid data from other scrapers that already completed.
 
 ### Efficient Status Monitoring
 

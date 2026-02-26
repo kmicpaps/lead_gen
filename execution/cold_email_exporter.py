@@ -99,7 +99,7 @@ def main():
     qa_warnings = {}
 
     for lead in leads:
-        email = lead.get("emails", [None])[0] if isinstance(lead.get("emails"), list) else lead.get("email_1", "")
+        email = (lead.get("emails") or [None])[0] if isinstance(lead.get("emails"), list) else lead.get("email_1", "")
         if not email:
             continue
 

@@ -146,8 +146,10 @@ def _encode(value: str) -> str:
 
 def _is_hex_id(value: str) -> bool:
     """Check if a string looks like a 24-character hex ID."""
+    if not isinstance(value, str):
+        return False
     import re
-    return bool(re.match(r'^[0-9a-f]{24}$', value))
+    return bool(re.match(r'^[0-9a-fA-F]{24}$', value))
 
 
 # ---------------------------------------------------------------------------

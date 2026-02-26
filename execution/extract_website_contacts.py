@@ -21,8 +21,14 @@ from bs4 import BeautifulSoup
 # Load environment variables
 load_dotenv()
 
-# Initialize clients
-anthropic_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+# Lazy-initialized client (avoids crash on import if API key is missing)
+_anthropic_client = None
+
+def get_anthropic_client():
+    global _anthropic_client
+    if _anthropic_client is None:
+        _anthropic_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    return _anthropic_client
 
 # Contact page patterns (priority order)
 CONTACT_PATTERNS = [
@@ -245,7 +251,7 @@ Website and Search Content:
 """
 
     try:
-        response = anthropic_client.messages.create(
+        response = get_anthropic_client().messages.create(
             model="claude-3-5-haiku-20241022",
             max_tokens=4096,
             messages=[{"role": "user", "content": prompt}]
@@ -254,12 +260,33 @@ Website and Search Content:
         # Extract JSON from response
         response_text = response.content[0].text.strip()
 
-        # Handle markdown code blocks
-        if response_text.startswith("```"):
-            response_text = response_text.split("```")[1]
-            if response_text.startswith("json"):
-                response_text = response_text[4:]
-            response_text = response_text.strip()
+        # Handle markdown code blocks — search for ```json first, then try each block
+        if "```" in response_text:
+            blocks = response_text.split("```")
+            parsed = None
+            # First pass: look for a block that starts with "json"
+            for block in blocks[1::2]:  # odd-indexed elements are inside fences
+                if block.startswith("json"):
+                    try:
+                        parsed = json.loads(block[4:].strip())
+                        break
+                    except json.JSONDecodeError:
+                        continue
+            # Second pass: try every fenced block as raw JSON
+            if parsed is None:
+                for block in blocks[1::2]:
+                    candidate = block.strip()
+                    # Strip optional language tag on first line
+                    if candidate and not candidate.startswith("{"):
+                        candidate = candidate.split("\n", 1)[-1].strip()
+                    try:
+                        parsed = json.loads(candidate)
+                        break
+                    except json.JSONDecodeError:
+                        continue
+            if parsed is not None:
+                response_text = json.dumps(parsed)  # re-serialize so the json.loads below works cleanly
+            # If no block parsed, fall through and let json.loads raise on the raw text
 
         result = json.loads(response_text)
 

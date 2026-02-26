@@ -10,11 +10,8 @@ import argparse
 from datetime import datetime
 import os
 
-def normalize_key(text):
-    """Normalize text for matching (lowercase, strip whitespace)."""
-    if not text:
-        return ''
-    return str(text).lower().strip()
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from utils import normalize_key
 
 def main():
     parser = argparse.ArgumentParser(description='Filter new leads by comparing against previous list')

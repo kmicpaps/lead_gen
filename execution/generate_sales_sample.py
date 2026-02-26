@@ -145,7 +145,7 @@ def read_apollo_cookie_from_env():
             env_content = f.read()
 
         # Find APOLLO_COOKIE=[...] in the file
-        match = re.search(r'(?:^|\n)APOLLO_COOKIE=(\[.*?\n\])', env_content, re.DOTALL | re.MULTILINE)
+        match = re.search(r'(?:^|\n)APOLLO_COOKIE=(\[.*?\])', env_content, re.DOTALL | re.MULTILINE)
         if match:
             cookie_str = match.group(1)
             try:
@@ -159,22 +159,18 @@ def read_apollo_cookie_from_env():
 
 
 def read_apify_key_from_env():
-    """Read Apify API key from .env file."""
-    try:
-        with open('.env', 'r', encoding='utf-8') as f:
-            for line in f:
-                if line.startswith('APIFY_API_KEY='):
-                    return line.split('=', 1)[1].strip()
-    except Exception:
-        pass
+    """Read Apify API key from environment."""
+    from dotenv import load_dotenv
+    load_dotenv()
     return os.getenv('APIFY_API_KEY')
 
 
-def scrape_sample_leads_from_apollo(apollo_url, max_leads=100):
+def scrape_sample_leads_from_apollo(apollo_url, max_leads=None):
     """
     Phase 2: Scrape sample leads from Apollo using Olympus scraper.
     Returns: list of lead dicts
     """
+    max_leads = max_leads or MAX_SAMPLE_LEADS
     print("\n" + "=" * 60)
     print("PHASE 2: LEAD SAMPLING")
     print("=" * 60)
@@ -582,7 +578,7 @@ def _call_anthropic_for_emails(prompt):
             "Content-Type": "application/json"
         },
         json={
-            "model": "claude-3-haiku-20240307",
+            "model": "claude-3-5-haiku-20241022",
             "max_tokens": 2000,
             "messages": [{"role": "user", "content": prompt}]
         },
@@ -846,7 +842,7 @@ def main():
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             report_path = os.path.join(args.output_dir, f"sample_{safe_name}_{timestamp}.md")
 
-            generate_sample_report(discovery, leads, email_sequence, personalized_emails, report_path)
+            generate_sample_report(discovery, best_leads, email_sequence, personalized_emails, report_path)
 
             print("\n" + "=" * 60)
             print("SAMPLE GENERATION COMPLETE")

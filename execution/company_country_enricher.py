@@ -27,11 +27,15 @@ from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from utils import RateLimiter, load_leads, save_json
+
 load_dotenv()
 
 # Rate limiting: 500 req/min = ~8.3 req/sec — use 7 to be safe
 RATE_LIMIT = 7
 MAX_WORKERS = 7
+rate_limiter = RateLimiter(RATE_LIMIT)
 
 progress_lock = Lock()
 progress = {
@@ -55,8 +59,8 @@ def search_company(domain, api_key):
     }
 
     try:
-        # Small delay for rate limiting (smoothing)
-        time.sleep(1.0 / RATE_LIMIT)
+        # Thread-safe rate limiting
+        rate_limiter.acquire()
 
         resp = requests.post(
             'https://api.leadmagic.io/v1/companies/company-search',
@@ -240,12 +244,11 @@ def main():
         return 1
 
     # Fix Windows encoding for Latvian characters
-    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
     # Load leads
     print(f"Loading leads from: {args.input}")
-    with open(args.input, 'r', encoding='utf-8') as f:
-        leads = json.load(f)
+    leads = load_leads(args.input)
     print(f"Loaded {len(leads)} leads")
 
     # Find leads needing enrichment
@@ -307,16 +310,14 @@ def main():
     filename = f"{args.output_prefix}_{ts}_{len(leads)}leads.json"
     filepath = os.path.join(args.output_dir, filename)
 
-    with open(filepath, 'w', encoding='utf-8') as f:
-        json.dump(leads, f, indent=2, ensure_ascii=False)
+    save_json(leads, filepath)
 
     print(f"\nEnriched leads saved: {filepath}")
     print(filepath)
 
     # Also save the domain results map for reference
     domain_map_path = os.path.join(args.output_dir, f"domain_country_map_{ts}.json")
-    with open(domain_map_path, 'w', encoding='utf-8') as f:
-        json.dump(domain_results, f, indent=2, ensure_ascii=False)
+    save_json(domain_results, domain_map_path)
     print(f"Domain map saved: {domain_map_path}")
 
     return 0

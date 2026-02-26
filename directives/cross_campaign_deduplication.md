@@ -104,11 +104,12 @@ Run cross-campaign deduplication:
 Update the lead generation workflow to include deduplication as a final step when the client already has existing campaigns:
 
 ```
-14-Step Workflow (Updated):
-1-13: [Existing steps...]
-14. Upload to Google Sheets + report
-15. Cross-campaign deduplication (if client has multiple campaigns)
-16. Update client.json with final lead counts
+9-Step V8 Workflow (Updated):
+1-4: Pre-flight, user picks scrapers, parallel scrape, merge & dedup
+5.  Cross-campaign deduplication (if client has multiple campaigns)
+6-7: Country verification, quality filtering
+8.  [Optional] AI enrichment
+9.  Upload to Google Sheets + update client.json
 ```
 
 ## Important Notes
@@ -131,8 +132,8 @@ Update the lead generation workflow to include deduplication as a final step whe
 - Consider running periodic re-deduplication
 
 ### What if I want to keep duplicates for a specific campaign?
-- Use `--exclude-campaigns` flag to skip specific campaigns
-- Example: `--exclude-campaigns special_vip_campaign`
+- Use the `--campaigns` flag to specify only the campaigns you want to dedup
+- Example: `--campaigns campaign_a,campaign_b` (omit the one you want to keep untouched)
 
 ## Error Handling
 

@@ -73,7 +73,7 @@ from scraper_registry import (
     SCRAPER_REGISTRY, VALID_SCRAPER_NAMES, ALL_SCRAPERS,
     build_scraper_command, get_default_target, estimate_time, estimate_cost
 )
-from utils import load_json, save_json, load_leads
+from utils import load_json, save_json, load_leads, normalize_key
 
 
 def try_recover_apify_run(scraper_name, config, campaign_folder):
@@ -101,9 +101,9 @@ def try_recover_apify_run(scraper_name, config, campaign_folder):
         from apify_client import ApifyClient
         from dotenv import load_dotenv
         load_dotenv()
-        apify_key = os.getenv('APIFY_API_TOKEN') or os.getenv('APIFY_TOKEN')
+        apify_key = os.getenv('APIFY_API_KEY')
         if not apify_key:
-            print(f"  [RECOVERY FAILED] No Apify API token found")
+            print(f"  [RECOVERY FAILED] No APIFY_API_KEY found in environment")
             return None
 
         client = ApifyClient(apify_key)
@@ -142,18 +142,13 @@ def try_recover_apify_run(scraper_name, config, campaign_folder):
         lead_count = len(dataset_items)
         print(f"  Downloaded {lead_count} leads from recovered run")
 
-        # Normalize and save (import the right normalizer)
-        if scraper_name == 'olympus':
-            from scraper_olympus_b2b_finder import normalize_lead_to_schema
-        elif scraper_name == 'codecrafter':
-            from scraper_codecrafter import normalize_lead_to_schema
-        elif scraper_name == 'peakydev':
-            from scraper_peakydev import normalize_lead_to_schema
-        else:
-            print(f"  [RECOVERY FAILED] Unknown scraper: {scraper_name}")
+        # Normalize using canonical normalizer (produces unified field names)
+        from lead_normalizer import normalize_leads_batch
+        normalized = normalize_leads_batch(dataset_items, scraper_name, fix_diacritics=True)
+        if not normalized:
+            print(f"  [RECOVERY FAILED] All leads filtered as junk after normalization")
             return None
-
-        normalized = [normalize_lead_to_schema(item) for item in dataset_items]
+        lead_count = len(normalized)  # Update to post-normalization count
 
         # Save to output dir
         output_dir = Path(config["output_dir"])
@@ -250,20 +245,28 @@ def get_lead_count_from_output(output):
     ]
 
     for pattern in patterns:
-        match = re.search(pattern, output)
-        if match:
-            return int(match.group(1))
+        matches = re.findall(pattern, output)
+        if matches:
+            return int(matches[-1])  # Take last match (avoids "Requesting N leads" in setup)
 
     return 0
 
 
-def find_latest_lead_file(directory, prefix=""):
-    """Find the most recent lead file in a directory."""
+def find_latest_lead_file(directory, prefix="", after_timestamp=None):
+    """Find the most recent lead file in a directory.
+
+    Args:
+        directory: Directory to search
+        prefix: Filename prefix to match
+        after_timestamp: If set, only return files modified after this time (epoch seconds)
+    """
     path = Path(directory)
     if not path.exists():
         return None
 
-    files = list(path.glob(f"{prefix}*.json"))
+    files = [f for f in path.glob(f"{prefix}*.json") if '.backup.' not in f.name]
+    if after_timestamp:
+        files = [f for f in files if f.stat().st_mtime >= after_timestamp]
     if not files:
         return None
 
@@ -293,6 +296,7 @@ def run_scraper_parallel(scrapers):
             success, exit_code, output = future.result()
             results[scraper_name] = {
                 'success': success,
+                'exit_code': exit_code,
                 'output': output,
                 'lead_count': get_lead_count_from_output(output) if success else 0
             }
@@ -524,6 +528,7 @@ def main():
 
     # STEP 1: Run ALL selected scrapers in parallel
     lead_sources = []
+    scrape_start_ts = time.time()  # Track start time to avoid picking up stale files
 
     # Build commands for all selected scrapers
     scrapers_to_run = []
@@ -560,7 +565,7 @@ def main():
             return 1
 
         lead_count = get_lead_count_from_output(output) if success else 0
-        lead_file = find_latest_lead_file(config["output_dir"], config["output_prefix"])
+        lead_file = find_latest_lead_file(config["output_dir"], config["output_prefix"], after_timestamp=scrape_start_ts)
         if lead_file and success:
             shutil.copy2(lead_file, campaign_folder / config["campaign_filename"])
             lead_sources.append((name, lead_file, lead_count))
@@ -578,12 +583,13 @@ def main():
             # Cookie failure warning (doesn't block other scrapers since they ran in parallel)
             if config["needs_cookies"] and not result.get('success'):
                 output = result.get('output', '')
-                if 'COOKIE VALIDATION FAILED' in output or 'cookie expired' in output.lower():
+                exit_code = result.get('exit_code')
+                if exit_code == config.get("cookie_exit_code") or 'COOKIE VALIDATION FAILED' in output or 'cookie expired' in output.lower():
                     print(f"\n[WARNING] {config['display_name']}: Cookie validation failed")
                     print(f"  Apollo session cookie has expired — {config['display_name']} returned 0 leads.")
                     print(f"  Other scrapers continued normally.")
 
-            lead_file = find_latest_lead_file(config["output_dir"], config["output_prefix"])
+            lead_file = find_latest_lead_file(config["output_dir"], config["output_prefix"], after_timestamp=scrape_start_ts)
             if lead_file and result.get('success'):
                 shutil.copy2(lead_file, campaign_folder / config["campaign_filename"])
                 lead_sources.append((name, lead_file, result['lead_count']))
@@ -593,6 +599,8 @@ def main():
                 if recovered:
                     rec_name, rec_file, rec_count = recovered
                     lead_sources.append((rec_name, rec_file, rec_count))
+            elif result.get('success') and not lead_file:
+                print(f"\n[WARNING] {config['display_name']}: Scraper reported success but no output file found in {config['output_dir']}")
 
     # STEP 2: Merge & deduplicate (if multiple sources)
     if len(lead_sources) > 1:
@@ -601,7 +609,7 @@ def main():
         merge_success, _, _ = run_command(merge_cmd, "Step 2: Merge & deduplicate sources", timeout=300)
 
         if merge_success:
-            raw_file = find_latest_lead_file(campaign_folder, 'raw_leads_')
+            raw_file = find_latest_lead_file(campaign_folder, 'raw_leads_', after_timestamp=scrape_start_ts)
         else:
             print("[WARNING] Merge failed, using first source file only")
             raw_file = lead_sources[0][1] if lead_sources else None
@@ -610,18 +618,40 @@ def main():
         raw_file = lead_sources[0][1] if lead_sources else None
         if raw_file:
             shutil.copy2(raw_file, campaign_folder / f'raw_leads_{datetime.now().strftime("%Y%m%d_%H%M%S")}_{lead_sources[0][2]}leads.json')
-            raw_file = find_latest_lead_file(campaign_folder, 'raw_leads_')
+            raw_file = find_latest_lead_file(campaign_folder, 'raw_leads_', after_timestamp=scrape_start_ts)
 
     if not raw_file:
         print("[ERROR] No leads available - exiting")
         return 1
 
     # STEP 3: Cross-campaign deduplication
+    # Register current campaign in client.json BEFORE dedup so it's included.
+    # Known limitation: if the pipeline crashes after this point, a stale
+    # "in_progress" entry remains in client.json.  It can be identified by
+    # its status field and cleaned up manually or by a future run.
+    client_file = Path(f'campaigns/{args.client_id}/client.json')
+    if client_file.exists():
+        _client_data = load_json(str(client_file))
+        _temp_entry = {
+            'campaign_id': campaign_id,
+            'campaign_name': args.campaign_name,
+            'type': 'apollo',
+            'created_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'lead_count': 0,
+            'sheet_url': '',
+            'status': 'in_progress',
+            'notes': 'pending — registered for cross-campaign dedup'
+        }
+        _client_data.setdefault('campaigns', []).append(_temp_entry)
+        save_json(_client_data, str(client_file))
+
     dedup_cmd = f'py execution/cross_campaign_deduplicator.py --client-id "{args.client_id}"'
-    _, _, _ = run_command(dedup_cmd, "Step 3: Cross-campaign deduplication", timeout=300)
+    dedup_success, _, _ = run_command(dedup_cmd, "Step 3: Cross-campaign deduplication", timeout=300)
+    if not dedup_success:
+        print("[WARNING] Cross-campaign deduplication failed — continuing with undeduped leads")
 
     # Refresh raw file path after deduplication
-    raw_file = find_latest_lead_file(campaign_folder, 'raw_leads_')
+    raw_file = find_latest_lead_file(campaign_folder, 'raw_leads_', after_timestamp=scrape_start_ts)
     if not raw_file:
         print("[ERROR] raw_leads file not found after cross-campaign dedup - exiting")
         return 1
@@ -646,7 +676,7 @@ def main():
             current_leads = load_leads(str(raw_file))
 
             before_count = len(current_leads)
-            current_leads = [l for l in current_leads if (l.get('email') or '').strip().lower() not in ref_emails]
+            current_leads = [l for l in current_leads if normalize_key(l.get('email')) not in ref_emails]
             removed = before_count - len(current_leads)
 
             # Save filtered leads
@@ -665,7 +695,7 @@ def main():
         verify_success, _, verify_output = run_command(verify_cmd, "Step 4: Country verification", timeout=600)
 
         if verify_success:
-            verified_file = find_latest_lead_file(campaign_folder, 'verified_')
+            verified_file = find_latest_lead_file(campaign_folder, 'verified_', after_timestamp=scrape_start_ts)
             if verified_file:
                 raw_file = verified_file
                 print(f"[OK] Using verified leads: {verified_file}")
@@ -687,7 +717,8 @@ def main():
             if apollo_filters.get('industries_resolved'):
                 combined = build_combined_whitelist(apollo_filters['industries_resolved'])
                 if combined:
-                    filter_args_list.extend(['--include-industries', f'"{",".join(combined)}"'])
+                    industry_str = "|".join(combined)
+                    filter_args_list.extend(['--include-industries', industry_str])
         except Exception as e:
             print(f"[WARNING] Could not auto-derive industry whitelist: {e}")
 
@@ -700,7 +731,7 @@ def main():
         filter_success, _, _ = run_command(filter_cmd, "Step 4.5: Quality filtering", timeout=120)
 
         if filter_success:
-            filtered_file = find_latest_lead_file(campaign_folder, 'filtered_')
+            filtered_file = find_latest_lead_file(campaign_folder, 'filtered_', after_timestamp=scrape_start_ts)
             if filtered_file:
                 raw_file = filtered_file
                 print(f"[OK] Using filtered leads: {filtered_file}")
@@ -718,7 +749,7 @@ def main():
 
         if casual_success:
             # Scripts print the output filepath on the last line of stdout
-            casual_file = find_latest_lead_file(campaign_folder, 'enriched_casual')
+            casual_file = find_latest_lead_file(campaign_folder, 'enriched_casual', after_timestamp=scrape_start_ts)
             if casual_file:
                 raw_file = casual_file
 
@@ -727,7 +758,7 @@ def main():
         icebreaker_success, _, _ = run_command(icebreaker_cmd, "Step 5b: AI icebreakers", timeout=1800)
 
         if icebreaker_success:
-            icebreaker_file = find_latest_lead_file(campaign_folder, 'enriched_icebreaker')
+            icebreaker_file = find_latest_lead_file(campaign_folder, 'enriched_icebreaker', after_timestamp=scrape_start_ts)
             if icebreaker_file:
                 raw_file = icebreaker_file
 
@@ -772,20 +803,29 @@ def main():
     if client_file.exists():
         client_data = load_json(str(client_file))
 
-        # Add campaign
+        # Update the temporary campaign entry registered in Step 3 (or append if missing)
+        existing_idx = next(
+            (i for i, c in enumerate(client_data.get('campaigns', []))
+             if c.get('campaign_id') == campaign_id), None
+        )
+
         campaign_entry = {
             'campaign_id': campaign_id,
             'campaign_name': args.campaign_name,
             'type': 'apollo',
-            'created_at': datetime.now(timezone.utc).isoformat() + 'Z',
+            'created_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
             'lead_count': final_count,
             'sheet_url': sheet_url or '',
+            'status': 'completed',
             'sources': {name: count for name, _, count in lead_sources},
             'notes': f'Generated with fast orchestrator - {"with AI enrichment" if args.enrich else "fast-track"}'
         }
 
-        client_data.setdefault('campaigns', []).append(campaign_entry)
-        client_data['updated_at'] = datetime.now(timezone.utc).isoformat() + 'Z'
+        if existing_idx is not None:
+            client_data['campaigns'][existing_idx] = campaign_entry
+        else:
+            client_data.setdefault('campaigns', []).append(campaign_entry)
+        client_data['updated_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
         save_json(client_data, str(client_file))
 

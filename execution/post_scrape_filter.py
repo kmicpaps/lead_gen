@@ -11,6 +11,7 @@ Enforceable filters (match against normalized lead fields):
   - Seniority: regex inference from lead.title
   - Person Location: substring match on lead.country / lead.city
   - Org Location: substring match on lead.company_country / lead.country
+  - Industries: substring match on lead.industry using resolved industry names
 
 NOT enforceable (data not available in normalized leads from backup scrapers):
   - Revenue, Funding, Functions/Departments
@@ -110,6 +111,9 @@ def filter_by_seniority(leads: list, required_seniorities: list) -> list:
     kept = []
     for lead in leads:
         title = lead.get("title") or ""
+        if not title:
+            kept.append(lead)  # Keep leads with no title — can't determine seniority
+            continue
         inferred = infer_seniority(title)
         if any(s in required_set for s in inferred):
             kept.append(lead)
@@ -142,6 +146,27 @@ def filter_by_org_location(leads: list, required_locations: list) -> list:
         country = (lead.get("country") or "").lower()
         combined = f"{company_country} {country}"
         if any(req in combined for req in required_lower):
+            kept.append(lead)
+    return kept
+
+
+def filter_by_industry(leads: list, required_industries: list) -> list:
+    """Keep leads whose industry matches any required industry keyword (substring, case-insensitive).
+
+    Uses industries_resolved (human-readable names) from the parsed Apollo URL.
+    Falls back to raw hex IDs if resolved names aren't available, but those
+    won't match anything meaningful — the caller should ensure resolution.
+    """
+    if not required_industries:
+        return leads
+    required_lower = [ind.lower() for ind in required_industries]
+    kept = []
+    for lead in leads:
+        industry = (lead.get("industry") or "").lower()
+        if not industry:
+            kept.append(lead)  # No industry data = can't verify, keep
+            continue
+        if any(req in industry for req in required_lower):
             kept.append(lead)
     return kept
 
@@ -180,6 +205,9 @@ def enforce_filters(leads: list, apollo_url: str, scraper: str) -> dict:
             current = filter_by_person_location(current, filters["locations"])
         elif filter_key == "org_locations" and filters.get("org_locations"):
             current = filter_by_org_location(current, filters["org_locations"])
+        elif filter_key == "industries" and filters.get("industries_resolved"):
+            # Use resolved human-readable names for substring matching
+            current = filter_by_industry(current, filters["industries_resolved"])
         else:
             continue  # No values for this filter in the URL
 

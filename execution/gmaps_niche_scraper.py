@@ -23,6 +23,9 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from dotenv import load_dotenv
 
+# Add execution/ to path for sibling imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 # Import Google Maps scraper
 from scrape_google_maps import scrape_google_maps
 

@@ -69,12 +69,28 @@ def analyze(original, human_filtered):
     original_emails = build_email_set(original)
 
     # Classify each original lead
+    # Also build name+company lookup for leads without email
+    kept_names = set()
+    for lead in human_filtered:
+        name = (get_field(lead, 'Name', 'name', 'full_name') or '').strip().lower()
+        org = (get_field(lead, 'Company', 'company_name', 'org_name') or '').strip().lower()
+        if name and org:
+            kept_names.add(f"{name}|{org}")
+
     kept = []
     removed = []
     for lead in original:
         email = normalize_email(get_field(lead, 'Email', 'email'))
         if email and email in kept_emails:
             kept.append(lead)
+        elif not email:
+            # Fallback: match by name + company for email-less leads
+            name = (get_field(lead, 'Name', 'name', 'full_name') or '').strip().lower()
+            org = (get_field(lead, 'Company', 'company_name', 'org_name') or '').strip().lower()
+            if name and org and f"{name}|{org}" in kept_names:
+                kept.append(lead)
+            else:
+                removed.append(lead)
         else:
             removed.append(lead)
 
@@ -169,13 +185,12 @@ def print_report(analysis):
     # Industry approval rates
     print("INDUSTRY APPROVAL RATES (lowest first):")
     print("-" * 60)
-    for ind, data in analysis['industry_approval'].items():
-        bar = '#' * int(data['approval_rate'] / 5)
+    industry_items = list(analysis['industry_approval'].items())
+    for ind, data in industry_items:
+        # Skip small industries when there are many for readability
+        if len(industry_items) > 30 and data['total'] < 10:
+            continue
         print(f"  {data['approval_rate']:5.1f}% [{data['kept']:4d}/{data['total']:4d}] {ind}")
-        if len(list(analysis['industry_approval'].items())) > 30:
-            # Only show industries with >10 leads for readability
-            if data['total'] < 10:
-                continue
     print()
 
     # Top removed titles

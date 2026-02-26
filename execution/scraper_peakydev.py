@@ -93,8 +93,8 @@ def map_apollo_to_peakydev(apollo_filters):
             if mapped_size not in mapped_sizes:
                 mapped_sizes.append(mapped_size)
 
-        # Add "0 - 1" if very small companies
-        if any(s in ['1,10', '0,1'] for s in apollo_filters['company_size']):
+        # Add "0 - 1" only if Apollo filter explicitly includes 0-1 range
+        if any(s in ['0,1'] for s in apollo_filters['company_size']):
             if '0 - 1' not in mapped_sizes:
                 mapped_sizes.insert(0, '0 - 1')
 
@@ -106,12 +106,18 @@ def map_apollo_to_peakydev(apollo_filters):
     person_locations = apollo_filters.get('locations')
 
     def _clean_country_names(locations):
-        """Title-case country names for PeakyDev API."""
+        """Title-case country names for PeakyDev API, preserving abbreviations (UK, USA, etc.)."""
         cleaned = []
         for loc in locations:
             loc_cleaned = loc.strip()
-            loc_cleaned = ' '.join(word.capitalize() for word in loc_cleaned.split())
-            cleaned.append(loc_cleaned)
+            # Preserve all-caps abbreviations (2-3 letters like UK, USA, UAE)
+            words = []
+            for word in loc_cleaned.split():
+                if len(word) <= 3 and word.isupper():
+                    words.append(word)
+                else:
+                    words.append(word.capitalize())
+            cleaned.append(' '.join(words))
         return cleaned
 
     if org_locations:
@@ -161,8 +167,16 @@ def map_apollo_to_peakydev(apollo_filters):
         revenue = apollo_filters['revenue']
         # PeakyDev uses range strings: "< 1M", "1M - 10M", "10M - 50M", etc.
         revenue_ranges = []
-        min_rev = int(revenue.get('min', 0) or 0)
-        max_rev = int(revenue.get('max', 0) or 0)
+        try:
+            min_rev = int(float(revenue.get('min', 0) or 0))
+        except (ValueError, TypeError):
+            min_rev = 0
+            print(f"  WARNING: Non-numeric revenue min '{revenue.get('min')}', defaulting to 0", file=sys.stderr)
+        try:
+            max_rev = int(float(revenue.get('max', 0) or 0))
+        except (ValueError, TypeError):
+            max_rev = 0
+            print(f"  WARNING: Non-numeric revenue max '{revenue.get('max')}', defaulting to 0", file=sys.stderr)
 
         # Map Apollo min/max to PeakyDev bucket strings
         buckets = [
@@ -177,8 +191,9 @@ def map_apollo_to_peakydev(apollo_filters):
         for low, high, label in buckets:
             # Include bucket if it overlaps with the min/max range
             if max_rev == 0:
-                # No upper bound — include all buckets >= min_rev bucket
-                if high > min_rev:
+                # No upper bound — include matching bucket + next 2 buckets up
+                # to avoid overbroad results (e.g. $1M min shouldn't include >$1B)
+                if high > min_rev and low < min_rev * 100:
                     revenue_ranges.append(label)
             elif low < max_rev and high > min_rev:
                 revenue_ranges.append(label)
@@ -227,30 +242,6 @@ def map_apollo_to_peakydev(apollo_filters):
         return None
 
     return peakydev_input
-
-
-def extract_org_keywords_from_url(apollo_url):
-    """
-    Extract organization keywords from Apollo URL.
-    These are often in qOrganizationKeywordTags[] parameter.
-    """
-    try:
-        parsed = urlparse(apollo_url)
-        if '?' in parsed.fragment:
-            query_string = parsed.fragment.split('?', 1)[1]
-        else:
-            query_string = parsed.query
-
-        params = parse_qs(query_string)
-
-        # Extract organization keywords
-        org_keywords = []
-        if 'qOrganizationKeywordTags[]' in params:
-            org_keywords = [unquote(kw) for kw in params['qOrganizationKeywordTags[]']]
-
-        return org_keywords
-    except Exception:
-        return []
 
 
 def normalize_lead_to_schema(lead):
@@ -302,7 +293,6 @@ def validate_leads_against_filters(leads, apollo_filters, validation_keywords):
 
     # Extract validation criteria
     title_keywords = [t.lower() for t in apollo_filters.get('titles', [])]
-    seniority_keywords = [s.lower() for s in apollo_filters.get('seniority', [])]
     locations_for_validation = apollo_filters.get('org_locations') or apollo_filters.get('locations', [])
     location_keywords = [loc.lower() for loc in locations_for_validation]
 
@@ -313,28 +303,21 @@ def validate_leads_against_filters(leads, apollo_filters, validation_keywords):
     for lead in leads:
         title = lead.get('title', '').lower()
         location = f"{lead.get('city', '')} {lead.get('country', '')}".lower()
-
-        # Check if lead matches any of the filters
-        matches = False
-
-        # Title match
-        if title_keywords and any(kw in title for kw in title_keywords):
-            matches = True
-
-        # Location match
-        if location_keywords and any(kw in location for kw in location_keywords):
-            matches = True
-
-        # General keyword match
         lead_text = f"{title} {location} {lead.get('org_name', '')}".lower()
-        if all_keywords and any(kw in lead_text for kw in all_keywords):
-            matches = True
 
-        # If no specific filters, count as match
-        if not title_keywords and not location_keywords and not all_keywords:
-            matches = True
+        # AND logic: lead must match ALL specified filter categories
+        passes_all = True
 
-        if matches:
+        if title_keywords and not any(kw in title for kw in title_keywords):
+            passes_all = False
+
+        if location_keywords and not any(kw in location for kw in location_keywords):
+            passes_all = False
+
+        if all_keywords and not any(kw in lead_text for kw in all_keywords):
+            passes_all = False
+
+        if passes_all:
             match_count += 1
 
     match_percentage = (match_count / total_count * 100) if total_count > 0 else 0
@@ -367,19 +350,14 @@ def run_peakydev_scraper(apollo_url, max_leads, output_dir='.tmp/peakydev', outp
         apollo_filters = parse_apollo_url(apollo_url)
         validation_keywords = extract_validation_keywords(apollo_filters)
 
-        # Extract organization keywords from URL
-        org_keywords = extract_org_keywords_from_url(apollo_url)
-        if org_keywords and 'keywords' not in apollo_filters:
-            apollo_filters['keywords'] = org_keywords
-        elif org_keywords:
-            apollo_filters['keywords'].extend(org_keywords)
+        # Note: org keywords are already extracted by parse_apollo_url() into apollo_filters['keywords']
 
         # Map to peakydev input schema
         peakydev_input = map_apollo_to_peakydev(apollo_filters)
 
         if peakydev_input is None:
             print("Aborting: Cannot scrape without industry filter. Resolve hex IDs first.", file=sys.stderr)
-            sys.exit(3)
+            return False, None, 0.0
 
         # Set result count
         # NOTE: Peakydev requires minimum 1000 leads - cannot do 25-lead test

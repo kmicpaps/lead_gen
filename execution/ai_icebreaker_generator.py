@@ -4,10 +4,10 @@ AI-powered icebreaker enrichment with website scraping.
 Generates personalized icebreaker messages for cold outreach.
 
 Usage:
-    py execution/enrich_icebreakers.py --input leads.json
-    py execution/enrich_icebreakers.py --input leads.json --ai-provider anthropic
-    py execution/enrich_icebreakers.py --input leads.json --template my_template.txt
-    py execution/enrich_icebreakers.py --input leads.json --skip-scraping
+    py execution/ai_icebreaker_generator.py --input leads.json
+    py execution/ai_icebreaker_generator.py --input leads.json --ai-provider anthropic
+    py execution/ai_icebreaker_generator.py --input leads.json --template my_template.txt
+    py execution/ai_icebreaker_generator.py --input leads.json --skip-scraping
 """
 
 import os
@@ -15,10 +15,11 @@ import sys
 import json
 import argparse
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from utils import RateLimiter
+from threading import Lock
+from utils import RateLimiter, load_leads, save_json
 
 # Import website scraper
 from website_scraper import scrape_website
@@ -52,7 +53,7 @@ def get_company_website(lead):
     return website
 
 
-def scrape_single_website(lead, scraping_errors_log):
+def scrape_single_website(lead, scraping_errors_log, scraping_errors_lock):
     """
     Scrape website content for a single lead.
     Returns: updated lead with website_content field
@@ -74,20 +75,22 @@ def scrape_single_website(lead, scraping_errors_log):
         else:
             # Scraping failed
             lead['icebreaker_error'] = f"scrape_failed: {result['error']}"
-            scraping_errors_log.append({
-                'company': lead.get('company_name', ''),
-                'website': website_url,
-                'error': result['error']
-            })
+            with scraping_errors_lock:
+                scraping_errors_log.append({
+                    'company': lead.get('company_name', '') or lead.get('org_name', ''),
+                    'website': website_url,
+                    'error': result['error']
+                })
             return lead
 
     except Exception as e:
         lead['icebreaker_error'] = f"scrape_exception: {str(e)}"
-        scraping_errors_log.append({
-            'company': lead.get('company_name', ''),
-            'website': website_url,
-            'error': str(e)
-        })
+        with scraping_errors_lock:
+            scraping_errors_log.append({
+                'company': lead.get('company_name', '') or lead.get('org_name', ''),
+                'website': website_url,
+                'error': str(e)
+            })
         return lead
 
 
@@ -99,11 +102,7 @@ def generate_icebreaker_openai(lead, api_key, rate_limiter, user_template=None):
     try:
         import openai
 
-        rate_limiter.acquire()
-
-        client = openai.OpenAI(api_key=api_key)
-
-        # Prepare lead info
+        # Prepare lead info and check preconditions BEFORE acquiring rate limit
         full_name = (lead.get('name', '') or lead.get('full_name', '')).strip()
         company_name = lead.get('casual_org_name', '') or lead.get('company_name', '') or lead.get('org_name', '')
         job_title = (lead.get('title', '') or lead.get('job_title', '')).strip()
@@ -111,6 +110,10 @@ def generate_icebreaker_openai(lead, api_key, rate_limiter, user_template=None):
 
         if not website_content or len(website_content) < 50:
             return None, False
+
+        rate_limiter.acquire()
+
+        client = openai.OpenAI(api_key=api_key)
 
         # Build prompt
         if user_template:
@@ -194,11 +197,7 @@ def generate_icebreaker_anthropic(lead, api_key, rate_limiter, user_template=Non
     try:
         import anthropic
 
-        rate_limiter.acquire()
-
-        client = anthropic.Anthropic(api_key=api_key)
-
-        # Prepare lead info
+        # Prepare lead info and check preconditions BEFORE acquiring rate limit
         full_name = (lead.get('name', '') or lead.get('full_name', '')).strip()
         company_name = lead.get('casual_org_name', '') or lead.get('company_name', '') or lead.get('org_name', '')
         job_title = (lead.get('title', '') or lead.get('job_title', '')).strip()
@@ -206,6 +205,10 @@ def generate_icebreaker_anthropic(lead, api_key, rate_limiter, user_template=Non
 
         if not website_content or len(website_content) < 50:
             return None, False
+
+        rate_limiter.acquire()
+
+        client = anthropic.Anthropic(api_key=api_key)
 
         # Build prompt
         if user_template:
@@ -258,7 +261,7 @@ Return ONLY the icebreaker text, nothing else. No greetings, no signatures, just
             messages=[
                 {"role": "user", "content": prompt}
             ],
-            timeout=30
+            timeout=30.0
         )
 
         icebreaker = message.content[0].text.strip()
@@ -303,7 +306,7 @@ def enrich_single_icebreaker(lead, ai_provider, api_key, rate_limiter, user_temp
             if success and icebreaker:
                 lead['icebreaker'] = icebreaker
                 lead['icebreaker_generated_by'] = ai_provider
-                lead['icebreaker_generated_at'] = datetime.now().isoformat()
+                lead['icebreaker_generated_at'] = datetime.now(timezone.utc).isoformat()
                 return lead
 
             if attempt < max_retries - 1:
@@ -347,6 +350,7 @@ def enrich_icebreakers(leads, ai_provider, api_key, skip_scraping=False, force_r
     print(f"AI Provider: {ai_provider.upper()}")
 
     scraping_errors_log = []
+    scraping_errors_lock = Lock()
 
     # Step 1: Scrape websites (if not skipping)
     if not skip_scraping:
@@ -361,22 +365,19 @@ def enrich_icebreakers(leads, ai_provider, api_key, skip_scraping=False, force_r
             failed_count = 0
             start_time = time.time()
 
-            lead_map = {id(lead): lead for lead in leads}
-
             with ThreadPoolExecutor(max_workers=SCRAPING_RATE_LIMIT) as executor:
                 future_to_lead = {
-                    executor.submit(scrape_single_website, lead, scraping_errors_log): id(lead)
+                    executor.submit(scrape_single_website, lead, scraping_errors_log, scraping_errors_lock): lead
                     for lead in leads_to_scrape
                 }
 
                 processed = 0
                 for future in as_completed(future_to_lead):
                     processed += 1
-                    lead_id = future_to_lead[future]
 
                     try:
+                        # scrape_single_website mutates lead in-place
                         updated_lead = future.result()
-                        lead_map[lead_id] = updated_lead
 
                         if updated_lead.get('website_content'):
                             scraped_count += 1
@@ -417,23 +418,21 @@ def enrich_icebreakers(leads, ai_provider, api_key, skip_scraping=False, force_r
     enriched_count = 0
     failed_count = 0
 
-    lead_map = {id(lead): lead for lead in leads}
     start_time = time.time()
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         future_to_lead = {
-            executor.submit(enrich_single_icebreaker, lead, ai_provider, api_key, rate_limiter, user_template): id(lead)
+            executor.submit(enrich_single_icebreaker, lead, ai_provider, api_key, rate_limiter, user_template): lead
             for lead in leads_with_content
         }
 
         processed = 0
         for future in as_completed(future_to_lead):
             processed += 1
-            lead_id = future_to_lead[future]
 
             try:
+                # enrich_single_icebreaker mutates lead in-place
                 updated_lead = future.result()
-                lead_map[lead_id] = updated_lead
 
                 if updated_lead.get('icebreaker'):
                     enriched_count += 1
@@ -460,9 +459,7 @@ def enrich_icebreakers(leads, ai_provider, api_key, skip_scraping=False, force_r
     # Save scraping errors log if any
     if scraping_errors_log:
         error_log_path = '.tmp/scraping_errors.log'
-        os.makedirs(os.path.dirname(error_log_path), exist_ok=True)
-        with open(error_log_path, 'w', encoding='utf-8') as f:
-            json.dump(scraping_errors_log, f, indent=2, ensure_ascii=False)
+        save_json(scraping_errors_log, error_log_path)
         print(f"\nScraping errors logged to: {error_log_path}")
 
     return leads
@@ -504,8 +501,7 @@ def main():
 
     try:
         # Load leads
-        with open(args.input, 'r', encoding='utf-8') as f:
-            leads = json.load(f)
+        leads = load_leads(args.input)
 
         if not leads:
             print("No leads to enrich", file=sys.stderr)
@@ -537,8 +533,7 @@ def main():
         filename = f"{args.output_prefix}_{timestamp}_{len(leads)}leads.json"
         filepath = os.path.join(args.output_dir, filename)
 
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(leads, f, indent=2, ensure_ascii=False)
+        save_json(leads, filepath)
 
         print(f"\nEnriched leads saved to: {filepath}")
         print(filepath)  # Print filepath to stdout for caller

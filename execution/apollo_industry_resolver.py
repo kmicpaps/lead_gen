@@ -239,7 +239,7 @@ LINKEDIN_INDUSTRIES = frozenset({
 # Pre-computed normalized set for fast validation lookups.
 # Keys are lowercased with " and " replaced by " & ".
 _LINKEDIN_INDUSTRIES_NORMALIZED = frozenset(
-    name.lower() for name in LINKEDIN_INDUSTRIES
+    name.lower().strip().replace(' and ', ' & ') for name in LINKEDIN_INDUSTRIES
 )
 
 

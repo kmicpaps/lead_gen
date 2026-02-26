@@ -20,6 +20,9 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from dotenv import load_dotenv
 
+# Add execution/ to path for sibling imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 # Import our scraping modules
 from scrape_google_maps import scrape_google_maps
 from extract_website_contacts import extract_website_contacts
@@ -45,7 +48,13 @@ HEADERS = [
 
 def generate_lead_id(business_name: str, address: str) -> str:
     """Generate unique lead ID from business name and address"""
-    key = f"{business_name}|{address}".lower().strip()
+    name = business_name or ''
+    addr = address or ''
+    if not name and not addr:
+        # Both empty — use random suffix to avoid hash collisions
+        import uuid
+        return hashlib.md5(f"unknown|{uuid.uuid4().hex[:8]}".encode()).hexdigest()
+    key = f"{name}|{addr}".lower().strip()
     return hashlib.md5(key.encode()).hexdigest()
 
 
@@ -135,23 +144,23 @@ def enrich_lead(business: Dict, search_query: str) -> Dict:
     Enrich a single business lead with website contact extraction
     """
     lead = {
-        "lead_id": generate_lead_id(business["business_name"], business["address"]),
+        "lead_id": generate_lead_id(business.get("business_name", ""), business.get("address", "")),
         "scraped_at": datetime.now().isoformat(),
         "search_query": search_query,
-        "business_name": business["business_name"],
-        "category": business["category"],
-        "address": business["address"],
-        "city": business["city"],
-        "state": business["state"],
-        "zip_code": business["zip_code"],
-        "country": business["country"],
-        "phone": business["phone"],
-        "website": business["website"],
-        "google_maps_url": business["google_maps_url"],
-        "place_id": business["place_id"],
-        "rating": business["rating"],
-        "review_count": business["review_count"],
-        "price_level": business["price_level"],
+        "business_name": business.get("business_name", ""),
+        "category": business.get("category", ""),
+        "address": business.get("address", ""),
+        "city": business.get("city", ""),
+        "state": business.get("state", ""),
+        "zip_code": business.get("zip_code", ""),
+        "country": business.get("country", ""),
+        "phone": business.get("phone", ""),
+        "website": business.get("website", ""),
+        "google_maps_url": business.get("google_maps_url", ""),
+        "place_id": business.get("place_id", ""),
+        "rating": business.get("rating", ""),
+        "review_count": business.get("review_count", ""),
+        "price_level": business.get("price_level", ""),
         "emails": "",
         "additional_phones": "",
         "business_hours": business.get("business_hours", ""),
@@ -174,7 +183,7 @@ def enrich_lead(business: Dict, search_query: str) -> Dict:
     }
 
     # Try to enrich if website exists
-    if business["website"]:
+    if business.get("website"):
         try:
             enrichment = extract_website_contacts(
                 business["website"],

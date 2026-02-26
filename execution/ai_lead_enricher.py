@@ -17,13 +17,13 @@ import argparse
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from utils import RateLimiter
+from utils import RateLimiter, load_leads, save_json
 
 
 def extract_org_name(lead):
@@ -209,8 +209,7 @@ def main():
     client = OpenAI(api_key=api_key)
 
     # Load leads
-    with open(args.input, 'r', encoding='utf-8') as f:
-        leads = json.load(f)
+    leads = load_leads(args.input)
 
     print(f"Loaded {len(leads)} leads")
     print(f"Client context: {args.client_context or '(none provided)'}")
@@ -239,10 +238,12 @@ def main():
         company_name = extract_org_name(lead) or f"Lead {i+1}"
         made_changes = False
 
-        # 1. Industry categorization
-        if not lead.get('industry') or not args.skip_existing:
+        # 1. Industry categorization (enrich if missing, or if --skip-existing not set)
+        existing_industry = (lead.get('industry') or '').strip().lower()
+        has_quality_industry = existing_industry and existing_industry not in ('', 'unknown', 'n/a', 'other')
+        if not has_quality_industry or not args.skip_existing:
             industry = categorize_industry(lead, client, rate_limiter)
-            if industry:
+            if industry and not has_quality_industry:
                 lead['industry'] = industry
                 made_changes = True
 
@@ -251,7 +252,7 @@ def main():
             summary = generate_company_summary(lead, client, rate_limiter)
             if summary:
                 lead['company_summary'] = summary
-                lead['company_summary_generated_at'] = datetime.now().isoformat()
+                lead['company_summary_generated_at'] = datetime.now(timezone.utc).isoformat()
                 made_changes = True
 
         # 3. Icebreaker
@@ -259,7 +260,7 @@ def main():
             icebreaker = generate_icebreaker(lead, client, rate_limiter, args.client_context)
             if icebreaker:
                 lead['icebreaker'] = icebreaker
-                lead['icebreaker_generated_at'] = datetime.now().isoformat()
+                lead['icebreaker_generated_at'] = datetime.now(timezone.utc).isoformat()
                 made_changes = True
 
         if made_changes:
@@ -273,8 +274,7 @@ def main():
 
     # Save
     output_path = args.output or args.input
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(leads, f, indent=2, ensure_ascii=False)
+    save_json(leads, output_path)
 
     print(f"Saved to: {output_path}")
     return 0

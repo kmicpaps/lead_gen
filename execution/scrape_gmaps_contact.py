@@ -84,7 +84,7 @@ def scrape_gmaps_with_contacts(
     print(f"Starting scrape: '{search_query}' (limit: {limit}, country: {country})")
     print(f"Actor: {ACTOR_ID}")
 
-    run = client.actor(ACTOR_ID).call(run_input=run_input)
+    run = client.actor(ACTOR_ID).call(run_input=run_input, timeout_secs=600)
 
     results = []
     raw_dumped = False

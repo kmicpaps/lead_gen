@@ -135,31 +135,22 @@ def slug_to_name_parts(slug: str) -> Tuple[str, str]:
         # Standard first-last
         return (parts[0].title(), parts[1].title())
 
-    # Multiple parts - first is first name, rest combined as last name
-    # This handles cases like "anna-maria-smith" -> "Anna Maria", "Smith"
-    # Or "john-van-der-berg" -> "John", "Van Der Berg"
+    # Multiple parts - detect where last name starts
+    # "anna-maria-smith" -> "Anna Maria", "Smith"
+    # "john-van-der-berg" -> "John", "Van Der Berg"
 
-    # Heuristic: if last part looks like a common surname suffix,
-    # combine appropriately
-    first_name = parts[0].title()
-
-    # Check if this looks like a multi-part last name (van, de, der, etc.)
     name_prefixes = {'van', 'von', 'de', 'der', 'den', 'la', 'le', 'di', 'da', 'du'}
 
-    # Find where last name starts
-    last_name_start = 1
-    for i, part in enumerate(parts[1:], 1):
-        if part.lower() in name_prefixes:
+    # Find where last name starts (scan for prefix patterns)
+    last_name_start = len(parts) - 1  # Default: last part is the surname
+    for i in range(1, len(parts) - 1):
+        if parts[i].lower() in name_prefixes:
             last_name_start = i
             break
 
-    # If no prefix found, assume second part onwards is last name
+    # Everything before last_name_start is first name(s), rest is last name
+    first_name = ' '.join(p.title() for p in parts[:last_name_start])
     last_name = ' '.join(p.title() for p in parts[last_name_start:])
-
-    # If we had a prefix match, include everything from there
-    if last_name_start > 1:
-        # First name might include middle parts
-        first_name = ' '.join(p.title() for p in parts[:last_name_start])
 
     return (first_name, last_name)
 

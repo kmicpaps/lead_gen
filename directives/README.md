@@ -43,6 +43,13 @@ Directives are living documents. Update them when you discover API constraints, 
 | `docs/2026-02_cold_email_deep_dive.md` | Practitioner cold email playbooks: agency strategies, copy frameworks, targeting, case studies, infrastructure |
 | `docs/cold_email_best_practices.md` | Legal compliance by country, copywriting best practices, deliverability, metrics, benchmarks |
 
+## System Maintenance
+
+| Directive | Purpose |
+|-----------|---------|
+| `system_maintenance.md` | Audit procedures, change logging protocol, severity/category definitions, MEMORY.md update rules |
+| `coding_standards.md` | Script structure, lead schema, directive/skill templates, integration checklists for common operations |
+
 ## Archived
 
 See `_archived/` for superseded versions and historical summaries:

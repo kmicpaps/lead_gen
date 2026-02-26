@@ -105,7 +105,7 @@ SCRAPER_REGISTRY = {
 
         "supported_filters": {
             "titles", "seniority", "industries", "keywords", "locations",
-            "org_locations", "company_size", "functions", "revenue", "funding"
+            "org_locations", "company_size", "revenue", "funding"
         },
 
         "location_type": "contact_location",
@@ -276,7 +276,7 @@ def get_default_target(name, remaining, max_leads_mode):
     if max_leads_mode == 'maximum':
         return config["max_leads"] or 5000
 
-    target = max(remaining, config["min_leads"] or 500)
+    target = max(remaining, config["min_leads"] if config["min_leads"] is not None else 0)
     if config["max_leads"]:
         target = min(target, config["max_leads"])
     return target

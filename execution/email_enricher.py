@@ -17,7 +17,7 @@ import time
 from datetime import datetime
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from utils import RateLimiter
+from utils import RateLimiter, load_leads, save_json
 
 # Load environment variables
 load_dotenv()
@@ -167,7 +167,7 @@ def enrich_missing_emails_concurrent(leads, api_key):
                 failed_count += 1
 
     elapsed_time = time.time() - start_time
-    actual_rate = len(leads_to_enrich) / elapsed_time
+    actual_rate = len(leads_to_enrich) / elapsed_time if elapsed_time > 0 else 0
 
     print(f"\nEnrichment complete in {elapsed_time:.1f}s ({actual_rate:.1f} leads/sec):")
     print(f"  Attempted: {len(leads_to_enrich)}")
@@ -192,8 +192,7 @@ def main():
 
     try:
         # Load leads
-        with open(args.input, 'r', encoding='utf-8') as f:
-            leads = json.load(f)
+        leads = load_leads(args.input)
 
         if not leads:
             print("No leads to enrich", file=sys.stderr)
@@ -213,8 +212,7 @@ def main():
         filename = f"{args.output_prefix}_{timestamp}_{len(leads)}leads.json"
         filepath = os.path.join(args.output_dir, filename)
 
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(leads, f, indent=2, ensure_ascii=False)
+        save_json(leads, filepath)
 
         print(f"\nEnriched leads saved to: {filepath}")
         print(filepath)  # Print filepath to stdout for caller

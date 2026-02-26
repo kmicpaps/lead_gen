@@ -38,7 +38,7 @@ def split_leads(leads: List[Dict], output_dir: str = ".tmp/split") -> Dict:
 
     for lead in leads:
         has_phone = bool(lead.get("phone"))
-        has_email = bool(lead.get("emails")) and len(lead.get("emails", [])) > 0
+        has_email = isinstance(lead.get("emails"), list) and len(lead.get("emails")) > 0
         has_website = bool(lead.get("website"))
 
         if has_email:

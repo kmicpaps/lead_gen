@@ -27,7 +27,7 @@ This directive provides a complete, self-contained lead generation pipeline that
 - **Tool:** `execution/gmaps_lead_pipeline.py`
 - **Process:**
   1. Scrape businesses from Google Maps
-  2. Parallel enrichment with ThreadPoolExecutor (default 3 workers)
+  2. Parallel enrichment with ThreadPoolExecutor (default 10 workers)
   3. Google Sheets authentication (OAuth)
   4. Save with MD5 deduplication (based on name|address)
 - **Output:** Google Sheet with 34-column schema
@@ -62,7 +62,7 @@ python3 execution/gmaps_lead_pipeline.py --search "roofers in Austin TX" --limit
 python3 execution/gmaps_lead_pipeline.py --search "coffee shops in Seattle" --limit 20 \
   --skip-enrichment
 
-# Adjust parallel workers (default: 3)
+# Adjust parallel workers (default: 10)
 python3 execution/gmaps_lead_pipeline.py --search "bakeries in Portland" --limit 30 \
   --workers 5
 ```
@@ -111,7 +111,7 @@ python3 execution/extract_website_contacts.py \
 - **Note:** Google Maps may return slightly different businesses or address formatting each run, leading to "false duplicates" being added
 
 ### 5. Performance
-- **Parallel enrichment speeds up processing** - Default 3 workers, adjustable
+- **Parallel enrichment speeds up processing** - Default 10 workers, adjustable
 - **Each enrichment takes ~10-20 seconds** - Website fetching + Claude extraction
 - **Rate limiting:** Built-in 0.5s delay between contact page fetches
 - **Total pipeline time:** ~2-5 minutes for 10 leads (depends on website complexity)

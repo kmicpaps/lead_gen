@@ -187,46 +187,28 @@ sheet_url.txt           # Google Sheets URL
 
 ## Integration with Existing Workflows
 
-### Apollo Lead Generation V4
+### Apollo Lead Generation (V8 Parallel Pipeline)
 
-**Modifications needed:**
-1. At start: Ask which client this campaign is for
-2. After export: Register campaign with `add_campaign_to_client()`
-3. Store outputs in client's `apollo_lists/` folder
+**The orchestrator handles client registration automatically.**
 
-**Example integration:**
+**Example:**
 
-```python
-# Step 0: Identify client
-client_id = "acme_corp"
-campaign_name = "Q4 Tech Leaders"
-
-# Steps 1-8: Run Apollo V5 workflow (see lead_generation_v5_optimized.md)
-# 1. Scrape with olympus (handle cookie renewal if needed)
-# 2. Extract filters
-# 3. Test with code_crafter (25 leads)
-# 4. Validate 80% match
-# 5. Full scrape with code_crafter
-# 6. Scrape with peakydev
-# 7. Handle peakydev failures
-# 8. Merge & deduplicate
-# 9-14. Email validation, enrichment, AI enrichment, export
-
-# Step 15: Register campaign
-from execution.client_manager import add_campaign_to_client
-
-add_campaign_to_client(client_id, {
-    "campaign_name": campaign_name,
-    "type": "apollo",
-    "lead_count": final_lead_count,
-    "sheet_url": google_sheet_url
-})
-
-# Step 16: Store outputs
-import shutil
-campaign_dir = f"campaigns/{client_id}/apollo_lists/{campaign_name.lower().replace(' ', '_')}_{timestamp}"
-shutil.copy("path/to/enriched_leads.json", f"{campaign_dir}/enriched_leads.json")
+```bash
+py execution/fast_lead_orchestrator.py \
+    --apollo-url "URL" \
+    --target-leads 1000 \
+    --client-id acme_corp \
+    --scrapers olympus,codecrafter,peakydev
 ```
+
+The orchestrator will:
+1. Run all selected scrapers in parallel
+2. Merge & deduplicate
+3. Cross-campaign dedup against previous campaigns
+4. Quality filter
+5. AI enrichment (icebreakers, company summaries)
+6. Export to Google Sheets
+7. Register campaign in client.json
 
 ### Google Maps Lead Generation
 

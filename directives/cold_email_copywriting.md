@@ -13,7 +13,7 @@ Generate effective cold email sequences using a reference copy library for tone/
 - Campaign parameters (tone, CTA type, sequence length)
 
 ## Tools
-- `execution/email_copywriter.py` - AI-powered email generator (to be created)
+- `execution/email_copywriter.py` - AI-powered email generator (**NOT YET CREATED** — command examples below are planned, not functional)
 - Reference copies in `campaigns/{client}/reference_copies/`
 
 ## Output
@@ -460,7 +460,7 @@ All the best with {{company}}.
 
 ---
 
-## Command Examples
+## Command Examples (PLANNED — `email_copywriter.py` does not exist yet)
 
 ### Generate Sequence for Campaign
 ```bash
@@ -680,7 +680,7 @@ john@acme.com,John,Acme Corp,"Quick question...","Hi John...","Re: Quick...","Fo
 
 ---
 
-## Integration with Workflow
+## Integration with Workflow (PLANNED — steps 3-4 require `email_copywriter.py` which is not yet created)
 
 ### Full Workflow
 ```bash

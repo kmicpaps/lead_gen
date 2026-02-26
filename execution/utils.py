@@ -142,6 +142,17 @@ def save_json(data, filepath, mkdir=False):
 
 
 # ---------------------------------------------------------------------------
+# Text normalization helpers
+# ---------------------------------------------------------------------------
+
+def normalize_key(text):
+    """Normalize text for matching (lowercase, strip whitespace)."""
+    if not text:
+        return ''
+    return str(text).lower().strip()
+
+
+# ---------------------------------------------------------------------------
 # Thread-safe rate limiter
 # ---------------------------------------------------------------------------
 
@@ -165,8 +176,14 @@ class RateLimiter:
             now = time.time()
             wait = self._last_request + self.interval - now
             if wait > 0:
-                time.sleep(wait)
-            self._last_request = time.time()
+                self._last_request = now + wait
+            else:
+                self._last_request = now
+            # Store wait needed before releasing lock
+            sleep_time = max(0, wait)
+        # Sleep OUTSIDE the lock so other threads can compute their own wait times
+        if sleep_time > 0:
+            time.sleep(sleep_time)
 
 
 # ---------------------------------------------------------------------------

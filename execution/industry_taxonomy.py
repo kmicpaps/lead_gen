@@ -46,7 +46,7 @@ V1_TO_V2 = {
     "Renewables & Environment": ["Services for Renewable Energy", "Environmental Services"],
     "Luxury Goods & Jewelry": ["Luxury Goods & Jewelry"],
     "Leisure, Travel & Tourism": ["Leisure, Travel & Tourism"],
-    "Nonprofit Organization Management": ["Non-profit Organization Management"],
+    "Non-Profit Organization Management": ["Non-profit Organization Management"],
 }
 
 # Auto-built reverse map: V2 → V1 (many-to-one)
@@ -72,7 +72,7 @@ def v1_to_v2(v1_names):
     mapped = []
     seen = set()
     for v1 in v1_names:
-        v2_list = V1_TO_V2.get(v1) or V1_TO_V2.get(v1.strip())
+        v2_list = V1_TO_V2.get(v1) or V1_TO_V2.get(v1.strip()) or _V1_TO_V2_LOWER.get(v1.lower().strip())
         if v2_list:
             for v2 in v2_list:
                 if v2 not in seen:
@@ -123,9 +123,14 @@ def build_combined_whitelist(v1_names):
     """
     combined = set()
     for v1 in v1_names:
+        # Normalize " and " / " & " so filter matching works with both taxonomies
+        combined.add(v1.lower().replace(' and ', ' & '))
+        combined.add(v1.lower().replace(' & ', ' and '))
         combined.add(v1.lower())
-        v2_list = V1_TO_V2.get(v1)
+        v2_list = V1_TO_V2.get(v1) or _V1_TO_V2_LOWER.get(v1.lower())
         if v2_list:
             for v2 in v2_list:
                 combined.add(v2.lower())
+                combined.add(v2.lower().replace(' and ', ' & '))
+                combined.add(v2.lower().replace(' & ', ' and '))
     return combined

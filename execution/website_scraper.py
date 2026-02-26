@@ -214,8 +214,12 @@ def scrape_website(url, timeout=30, retry_attempts=3):
             return result
 
         except requests.exceptions.ConnectionError:
-            result['error'] = 'connection_error'
-            return result
+            if attempt < retry_attempts - 1:
+                time.sleep(2 * (attempt + 1))
+                continue
+            else:
+                result['error'] = 'connection_error'
+                return result
 
         except Exception as e:
             result['error'] = f'unknown_error: {str(e)}'
@@ -262,7 +266,7 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
-        print("Usage: py execution/scrape_website_content.py <url>")
+        print("Usage: py execution/website_scraper.py <url>")
         sys.exit(1)
 
     test_url = sys.argv[1]

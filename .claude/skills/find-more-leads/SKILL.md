@@ -26,7 +26,7 @@ Read `directives/lead_generation_v5_optimized.md` for the full pipeline workflow
 This follows the same pipeline as `/new-apollo-list` with key differences:
 
 1. **Create a NEW campaign folder** — never merge into the old one. Use a new date suffix.
-2. Follow the standard scraping pipeline (Olympus first, backups if needed)
+2. Run ALL selected scrapers in parallel (same as `/new-apollo-list`)
 3. Merge & internal dedup
 4. **Cross-campaign dedup against ALL existing campaigns** — this is the critical step
 5. Quality filter the remaining new leads

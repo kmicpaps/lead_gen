@@ -75,7 +75,7 @@ def create_client(client_data: Dict) -> str:
     (client_dir / "google_maps_lists").mkdir(exist_ok=True)
 
     # Create client metadata
-    now = datetime.now(timezone.utc).isoformat() + "Z"
+    now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     metadata = {
         "client_id": client_id,
         "company_name": client_data['company_name'],
@@ -137,7 +137,7 @@ def update_client(client_id: str, updates: Dict) -> bool:
         if key not in ['client_id', 'created_at', 'campaigns']:  # Protect immutable fields
             client[key] = value
 
-    client['updated_at'] = datetime.now(timezone.utc).isoformat() + "Z"
+    client['updated_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
     # Write back
     client_file = CAMPAIGNS_DIR / client_id / "client.json"
@@ -186,13 +186,13 @@ def add_campaign_to_client(client_id: str, campaign_data: Dict) -> bool:
         "campaign_id": campaign_id,
         "campaign_name": campaign_data.get('campaign_name', 'Untitled Campaign'),
         "type": campaign_type,
-        "created_at": datetime.now(timezone.utc).isoformat() + "Z",
+        "created_at": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         "lead_count": campaign_data.get('lead_count', 0),
         "sheet_url": campaign_data.get('sheet_url', '')
     }
 
     client['campaigns'].append(campaign_metadata)
-    client['updated_at'] = datetime.now(timezone.utc).isoformat() + "Z"
+    client['updated_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
     # Write back
     client_file = CAMPAIGNS_DIR / client_id / "client.json"

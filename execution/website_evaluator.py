@@ -116,7 +116,7 @@ def evaluate_website(url: str, api_key: Optional[str] = None, access_token: Opti
     html = ""
     headers = {}
     try:
-        with httpx.Client(timeout=15, follow_redirects=True, verify=False) as client:
+        with httpx.Client(timeout=15, follow_redirects=True) as client:
             resp = client.get(url)
             html = resp.text
             headers = dict(resp.headers)
@@ -200,11 +200,11 @@ def call_pagespeed_api(url: str, api_key: Optional[str] = None, access_token: Op
             "accessibility_score": score("accessibility"),
             "seo_score": score("seo"),
             "best_practices_score": score("best-practices"),
-            "fcp_seconds": round(audit_ms("first-contentful-paint") / 1000, 2) if audit_ms("first-contentful-paint") else None,
-            "lcp_seconds": round(audit_ms("largest-contentful-paint") / 1000, 2) if audit_ms("largest-contentful-paint") else None,
+            "fcp_seconds": round(audit_ms("first-contentful-paint") / 1000, 2) if audit_ms("first-contentful-paint") is not None else None,
+            "lcp_seconds": round(audit_ms("largest-contentful-paint") / 1000, 2) if audit_ms("largest-contentful-paint") is not None else None,
             "cls": round(audit_ms("cumulative-layout-shift"), 3) if audit_ms("cumulative-layout-shift") is not None else None,
             "tbt_ms": int(audit_ms("total-blocking-time")) if audit_ms("total-blocking-time") is not None else None,
-            "speed_index_seconds": round(audit_ms("speed-index") / 1000, 2) if audit_ms("speed-index") else None,
+            "speed_index_seconds": round(audit_ms("speed-index") / 1000, 2) if audit_ms("speed-index") is not None else None,
             "is_mobile_friendly": audits.get("viewport", {}).get("score") == 1,
         }
 
@@ -336,14 +336,15 @@ def evaluate_websites_batch(
         List of leads with evaluation fields attached
     """
     # Filter leads that have websites to evaluate
-    to_evaluate = [(i, lead) for i, lead in enumerate(leads) if lead.get("website")]
+    to_evaluate = [(i, lead) for i, lead in enumerate(leads) if lead.get("website_url") or lead.get("website") or lead.get("company_website")]
     print(f"\nEvaluating {len(to_evaluate)} websites ({len(leads) - len(to_evaluate)} skipped — no website)")
 
     results = {}
 
     def evaluate_one(index, lead):
-        time.sleep(delay_between * index)  # Stagger requests
-        url = lead["website"]
+        # Rate-limit via fixed delay per task (not linear O(n) stagger)
+        time.sleep(delay_between)
+        url = lead.get("website_url") or lead.get("website") or lead.get("company_website")
         evaluation = evaluate_website(url, api_key, access_token)
         return index, evaluation
 

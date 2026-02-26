@@ -1,10 +1,10 @@
-# techstart Latvia GMaps Pipeline
+# GMaps Scored Pipeline
 
 ## Objective
 
 Scrape local businesses from Google Maps (Latvia-wide), split into cold calling vs cold email streams, evaluate websites with PageSpeed Insights, and export scored leads to Google Sheets.
 
-**Client:** techstart — website build offer targeting small Latvia businesses without websites or with poor-performing sites.
+**Client:** `{client_id}` — configure per client in `campaigns/{client_id}/client.json`.
 
 ## Critical Rules
 
@@ -58,10 +58,10 @@ Pipeline scrapes 10 leads per term to validate they return results. Aborts if an
 ```
 python execution/gmaps_scored_pipeline.py \
   --niches "juristi:juristi" "frizieris:frizieris" "būvnieki:būvniecība" \
-  --limit 500 --evaluate-websites --workers 3 \
+  --limit 500 --evaluate-websites --workers 5 \
   --sheet-url "SHEET_URL"
 ```
-Each niche runs as a separate Apify actor call (~5 min each). Raw results saved to `.tmp/techstart_pipeline/scraped_YYYYMMDD_HHMMSS.json`.
+Each niche runs as a separate Apify actor call (~5 min each). Raw results saved to `.tmp/{client_id}_pipeline/scraped_YYYYMMDD_HHMMSS.json`.
 
 ### Step 2: Dedup
 Deduplicate by `place_id`, then by `business_name|address` hash.
@@ -95,13 +95,13 @@ Three tabs:
 ## Outputs
 
 - Google Sheet with 3 tabs (deliverable)
-- `.tmp/techstart_pipeline/` intermediate files (disposable)
+- `.tmp/{client_id}_pipeline/` intermediate files (disposable)
 
 ## Error Handling
 
 - **Pre-test catches bad terms:** Pipeline aborts before spending budget if any term returns 0 results
 - **Apify rate limits:** Actor runs sequentially per niche — no parallel API stress
-- **PSI 429 (quota):** OAuth token has higher limits than unauthenticated. If still hit, reduce `--workers` from 3 to 1
+- **PSI 429 (quota):** OAuth token has higher limits than unauthenticated. If still hit, reduce `--workers` from 5 to 1
 - **PSI 403:** Re-auth with expanded scopes: delete `token.json`, re-run pipeline (will prompt browser auth)
 - **0 results mid-run:** Warning printed, but pipeline continues with remaining niches
 
@@ -116,7 +116,7 @@ Three tabs:
 ### Production Run Timing
 - Pre-test: ~1 min per term
 - Scraping: ~5 min per niche
-- Website evaluation: ~30-40 min for 150 websites (3 workers)
+- Website evaluation: ~30-40 min for 150 websites (5 workers)
 - Sheets export: ~2 min
 - **Total: ~55 min for 3 niches + eval**
 
@@ -132,8 +132,8 @@ To re-run evaluation + export on existing data:
 ```
 python execution/gmaps_scored_pipeline.py \
   --niches "juristi:juristi" \
-  --skip-scrape .tmp/techstart_pipeline/scraped_YYYYMMDD_HHMMSS.json \
-  --evaluate-websites --workers 3 \
+  --skip-scrape .tmp/{client_id}_pipeline/scraped_YYYYMMDD_HHMMSS.json \
+  --evaluate-websites --workers 5 \
   --sheet-url "SHEET_URL"
 ```
 
@@ -144,21 +144,21 @@ After the main pipeline completes, segment leads and generate Instantly-ready CS
 ```bash
 # Step 1: Segment leads + translate insights to Latvian
 python execution/lead_segmenter.py \
-  --input .tmp/techstart_pipeline/cold_email_evaluated.json \
-  --output .tmp/techstart_pipeline/cold_email_segmented.json
+  --input .tmp/{client_id}_pipeline/cold_email_evaluated.json \
+  --output .tmp/{client_id}_pipeline/cold_email_segmented.json
 
 # Step 2: Export to Instantly CSV (with QA check)
 python execution/cold_email_exporter.py \
-  --input .tmp/techstart_pipeline/cold_email_segmented.json \
-  --templates campaigns/techstart/copy/website_build/ \
-  --output campaigns/techstart/instantly/website_build_YYYYMMDD.csv \
+  --input .tmp/{client_id}_pipeline/cold_email_segmented.json \
+  --templates campaigns/{client_id}/copy/website_build/ \
+  --output campaigns/{client_id}/instantly/website_build_YYYYMMDD.csv \
   --qa
 ```
 
 **Key rules:**
 - All email copy follows anti-AI writing rules (see `docs/anti_ai_writing_rules.md`)
 - QA check must pass (zero em-dashes, zero Compliment-But patterns, insights max 15 words)
-- Templates live in `campaigns/techstart/copy/website_build/` (10 Latvian templates)
+- Templates live in `campaigns/{client_id}/copy/website_build/`
 - Export format: Instantly CSV with 3-email sequence per lead
 
 ### Campaign History

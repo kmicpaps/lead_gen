@@ -43,17 +43,20 @@ Show the user:
 
 Present a numbered menu. Let user pick. Common filters:
 - `--require-email` — remove leads without email
-- `--require-country XX` — keep only leads in specific country
+- `--require-country COUNTRY_NAME` — keep only leads in specific country (e.g. "Italy", "Latvia")
 - `--remove-phone-discrepancies` — remove leads with phone from wrong country
-- `--filter-titles` — keep only leads matching Apollo title filters
-- `--filter-industries` — keep only relevant industries
+- `--exclude-titles-builtin` — exclude individual contributors (keeps managers, directors, C-level)
+- `--include-industries LIST` — pipe-separated (`|`) industry whitelist (e.g. `"Retail|Construction|Glass, Ceramics & Concrete"`)
+- `--exclude-industries LIST` — pipe-separated (`|`) industry blacklist (e.g. `"Farming|Gambling & Casinos"`)
+- `--require-website` — remove leads without website
+- `--remove-foreign-tld` — remove leads with domain TLD mismatching target country
 
 ### Step 4: Apply
 
 ```bash
 py execution/lead_filter.py \
     --input leads.json \
-    --apollo-url "URL" \
+    --output-dir path/to/output_dir \
     [user-chosen flags]
 ```
 

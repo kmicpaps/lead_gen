@@ -13,7 +13,7 @@ import csv
 import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from utils import load_leads, save_leads
+from utils import load_leads, save_leads, normalize_key
 
 def count_non_empty_fields(lead):
     """Count how many fields have non-empty values."""
@@ -47,12 +47,6 @@ def merge_leads(existing, new):
 
     base_record['source'] = combined_sources
     return base_record
-
-def normalize_key(text):
-    """Normalize text for matching (lowercase, strip whitespace)."""
-    if not text:
-        return ''
-    return str(text).lower().strip()
 
 def main():
     parser = argparse.ArgumentParser(description='Merge and deduplicate leads from multiple sources')

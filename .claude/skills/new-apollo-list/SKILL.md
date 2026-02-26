@@ -35,7 +35,7 @@ Key steps:
 5. Run ALL selected scrapers in parallel
 6. Merge & internal deduplication
 7. Cross-campaign deduplication (if client has existing campaigns)
-8. Industry relevance filter (if multi-scraper)
+8. **[MANUAL]** Industry relevance filter — NOT auto-run by orchestrator. Only run manually (`py execution/industry_relevance_filter.py`) if multi-scraper and user wants AI-powered industry scoring before quality filtering.
 9. Quality filter — run analyzer, **present report to user, let them choose filters**
 10. Export to Google Sheets
 11. Update `client.json` with campaign metadata
