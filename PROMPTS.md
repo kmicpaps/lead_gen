@@ -90,6 +90,7 @@ Note: Google Maps gives you **business-level contacts** (company phone, website,
 | `/pipeline-overview` | Show all commands + decision tree | nothing |
 | `/system-audit` | Run a structured codebase audit, log findings, fix issues | nothing |
 | `/maintain` | Quick structural health check (registry, normalizer, directives, scripts) | nothing (or specific scope) |
+| `/setup` | Workspace onboarding — check deps, API keys, credentials, health | nothing |
 
 ---
 

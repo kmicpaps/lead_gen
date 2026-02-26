@@ -319,6 +319,24 @@
       "tags": [
         "maintenance"
       ]
+    },
+    {
+      "id": "20260226_183503_001",
+      "timestamp": "2026-02-26T18:35:03Z",
+      "type": "feature",
+      "summary": "Add /setup command: workspace onboarding wizard with dependency, API key, credential, and health checks",
+      "files_changed": [
+        "execution/setup_wizard.py",
+        ".claude/skills/setup/SKILL.md",
+        ".claude/skills/pipeline-overview/SKILL.md",
+        "PROMPTS.md",
+        "README.md"
+      ],
+      "severity": "medium",
+      "tags": [
+        "setup",
+        "onboarding"
+      ]
     }
   ]
 }

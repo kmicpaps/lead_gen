@@ -20,8 +20,12 @@ allowed-tools: Read, Grep, Glob
 | `/cold-email-planning` | Generate cold email sequences using client context and lead data |
 | `/system-audit` | Run a structured codebase audit, log findings, fix issues, generate report |
 | `/maintain` | Quick structural health check — registry, normalizer, directives, skills, scripts |
+| `/setup` | Workspace onboarding — check deps, API keys, credentials, run health check |
 
 ## Decision Tree
+
+**"I just cloned this repo / moved to a new machine"**
+→ `/setup`
 
 **"I want to scrape leads"**
 → Have an Apollo URL? → `/new-apollo-list`

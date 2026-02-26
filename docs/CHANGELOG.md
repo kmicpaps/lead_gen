@@ -22,6 +22,7 @@ Do not edit manually.
 ### Features
 
 - **[MEDIUM]** Maintenance procedure: coding standards, health check script, /maintain command, Change Protocol in CLAUDE.md -- `directives/coding_standards.md`, `execution/system_health_check.py`, `.claude/skills/maintain/SKILL.md`, `CLAUDE.md`, `directives/system_maintenance.md`, `.claude/skills/pipeline-overview/SKILL.md`, `PROMPTS.md`, `directives/README.md`
+- **[MEDIUM]** Add /setup command: workspace onboarding wizard with dependency, API key, credential, and health checks -- `execution/setup_wizard.py`, `.claude/skills/setup/SKILL.md`, `.claude/skills/pipeline-overview/SKILL.md`, `PROMPTS.md`, `README.md`
 
 ### Audits
 

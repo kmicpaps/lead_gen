@@ -37,6 +37,10 @@ You'll need accounts and API keys for:
 
 ## Setup
 
+The fastest way: open this repo in Claude Code and run `/setup`. It checks everything and walks you through any missing pieces.
+
+Or manually:
+
 ```bash
 # 1. Clone
 git clone https://github.com/kmicpaps/lead_gen.git
@@ -52,11 +56,14 @@ cp .env.example .env
 # 4. Set up Google OAuth (for Sheets export)
 # Place credentials.json in the root directory
 # Run any script that uses Sheets — it will prompt for OAuth on first run
+
+# 5. Verify everything works
+py execution/setup_wizard.py
 ```
 
 ## Slash Commands
 
-This workspace includes 11 Claude Code slash commands for common tasks:
+This workspace includes 14 Claude Code slash commands for common tasks:
 
 | Command | What it does |
 |---------|-------------|
@@ -71,6 +78,9 @@ This workspace includes 11 Claude Code slash commands for common tasks:
 | `/create-sales-sample` | Generate demo deliverables for prospects |
 | `/onboard-new-client` | Set up a new client folder structure |
 | `/pipeline-overview` | See all available capabilities |
+| `/system-audit` | Deep codebase audit — find and fix bugs |
+| `/maintain` | Quick structural health check |
+| `/setup` | Workspace onboarding — verify deps, API keys, credentials |
 
 See [PROMPTS.md](PROMPTS.md) for copy-paste prompt templates and detailed usage.
 
