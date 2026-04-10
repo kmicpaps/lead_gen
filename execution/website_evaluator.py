@@ -21,7 +21,7 @@ import httpx
 from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from utils import load_json, save_json
+from utils import load_json, save_json, get_google_credentials, log_warn, log_info
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -164,7 +164,11 @@ def evaluate_website(url: str, api_key: Optional[str] = None, access_token: Opti
 
 def call_pagespeed_api(url: str, api_key: Optional[str] = None, access_token: Optional[str] = None) -> Optional[Dict]:
     """Call Google PageSpeed Insights API and extract key metrics.
-    Auth priority: API key > OAuth access token > no auth (public, strict rate limit)."""
+    Auth priority: API key > OAuth access token > no auth (public, strict rate limit).
+
+    Returns None on failure. Errors are logged to stderr so quota/auth issues
+    are visible instead of silently producing empty score columns.
+    """
     try:
         params = {
             "url": url,
@@ -179,6 +183,10 @@ def call_pagespeed_api(url: str, api_key: Optional[str] = None, access_token: Op
         with httpx.Client(timeout=60) as client:
             resp = client.get(PSI_ENDPOINT, params=params, headers=req_headers)
             if resp.status_code != 200:
+                # Log loudly so quota / auth / scope errors don't silently
+                # produce empty score columns in the final sheet.
+                snippet = resp.text[:200].replace("\n", " ")
+                print(f"[PSI ERROR] {url} -> HTTP {resp.status_code}: {snippet}", file=sys.stderr)
                 return None
             data = resp.json()
 
@@ -208,7 +216,8 @@ def call_pagespeed_api(url: str, api_key: Optional[str] = None, access_token: Op
             "is_mobile_friendly": audits.get("viewport", {}).get("score") == 1,
         }
 
-    except Exception:
+    except Exception as e:
+        print(f"[PSI ERROR] {url} -> exception: {type(e).__name__}: {str(e)[:200]}", file=sys.stderr)
         return None
 
 
@@ -340,6 +349,7 @@ def evaluate_websites_batch(
     print(f"\nEvaluating {len(to_evaluate)} websites ({len(leads) - len(to_evaluate)} skipped — no website)")
 
     results = {}
+    psi_failures = 0
 
     def evaluate_one(index, lead):
         # Rate-limit via fixed delay per task (not linear O(n) stagger)
@@ -396,18 +406,51 @@ def evaluate_websites_batch(
             lead_copy["insights"] = []
         enriched.append(lead_copy)
 
-    # Print summary
+    # Print summary — count by status so silent PSI failures are visible
+    from collections import Counter
+    status_counts = Counter(e.get("eval_status") for e in enriched if e.get("eval_status") != "no_website")
     evaluated = [e for e in enriched if e.get("eval_status") == "success"]
+    print(f"\nEvaluation summary:")
+    print(f"  Status breakdown: {dict(status_counts)}")
     if evaluated:
         scores = [e["overall_score"] for e in evaluated if e["overall_score"] is not None]
         avg = sum(scores) / len(scores) if scores else 0
         below_50 = sum(1 for s in scores if s < 50)
-        print(f"\nEvaluation summary:")
-        print(f"  Successful: {len(evaluated)}/{len(to_evaluate)}")
+        print(f"  Successful (PSI scores): {len(evaluated)}/{len(to_evaluate)}")
         print(f"  Avg score: {avg:.0f}/100")
         print(f"  Below 50: {below_50} ({100*below_50//max(len(scores),1)}%)")
+    else:
+        print(f"  [WARN] 0 leads got PSI scores. Check stderr for [PSI ERROR] lines above.")
+        print(f"  [WARN] Common causes: missing scope, expired token, exceeded quota, PageSpeed Insights API not enabled in Google Cloud project.")
 
     return enriched
+
+
+def _get_psi_auth():
+    """Resolve PageSpeed auth: API key > shared OAuth token > unauthenticated.
+
+    Returns (api_key, access_token) where exactly one (or neither) is set.
+    Prints which auth path was selected so quota issues are debuggable.
+    """
+    api_key = os.getenv("GOOGLE_PAGESPEED_API_KEY")
+    if api_key:
+        log_info("PSI auth: API key (GOOGLE_PAGESPEED_API_KEY)")
+        return api_key, None
+
+    # Fall back to the shared workspace OAuth token (token.json).
+    # This is the same credential used by gmaps_sheets_exporter and any other
+    # Google API integration. Adding the pagespeedonline scope to GOOGLE_SCOPES
+    # in utils.py is what enables this path.
+    try:
+        creds = get_google_credentials()
+        if creds and creds.token:
+            log_info("PSI auth: OAuth bearer token (shared token.json)")
+            return None, creds.token
+    except Exception as e:
+        log_warn(f"Could not load shared Google credentials for PSI: {e}")
+
+    log_warn("PSI auth: NONE — using public endpoint (60 req/100s shared per-IP, often quota-exhausted)")
+    return None, None
 
 
 def main():
@@ -419,13 +462,11 @@ def main():
 
     args = parser.parse_args()
 
-    api_key = os.getenv("GOOGLE_PAGESPEED_API_KEY")
-    if not api_key:
-        print("[INFO] No API key — using public PageSpeed API (rate limit ~60 req/100s)")
+    api_key, access_token = _get_psi_auth()
 
     if args.url:
         # Single URL mode
-        result = evaluate_website(args.url, api_key)
+        result = evaluate_website(args.url, api_key, access_token)
         print(json.dumps(result, indent=2))
         if args.output:
             save_json(result, args.output)
@@ -434,7 +475,7 @@ def main():
         # Batch mode
         leads = load_json(args.input)
 
-        enriched = evaluate_websites_batch(leads, api_key, max_workers=args.workers)
+        enriched = evaluate_websites_batch(leads, api_key, access_token, max_workers=args.workers)
 
         output_path = args.output or args.input.replace(".json", "_evaluated.json")
         save_json(enriched, output_path)

@@ -227,3 +227,75 @@ def log_progress(current, total, extra=""):
     if extra:
         msg += f" | {extra}"
     print(msg)
+
+
+# ---------------------------------------------------------------------------
+# Google OAuth (single shared token across all pipelines)
+# ---------------------------------------------------------------------------
+
+# Single source of truth for Google OAuth scopes used across the workspace.
+# All scripts that need any Google API call (Sheets, Drive, PageSpeed, etc.)
+# go through get_google_credentials() so they share one token.json.
+#
+# Note: PageSpeed Insights API does NOT have a dedicated OAuth scope.
+# It accepts any valid OAuth bearer token from a Cloud project that has
+# the PageSpeed Insights API enabled — the project is identified from the
+# token itself, not from a scope. The 'openid' scope below is what allows
+# the token to carry that project identity.
+GOOGLE_SCOPES = [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive.file',
+    'openid',
+]
+
+
+def get_google_credentials(token_path='token.json', credentials_path='credentials.json'):
+    """
+    Load (or create + refresh) the shared Google OAuth credentials.
+
+    All Google API integrations in this workspace MUST go through this function
+    so we maintain a single token.json with the union of all required scopes.
+    Adding a new Google API:
+      1. Add its scope to GOOGLE_SCOPES above
+      2. Delete token.json so the next run re-prompts for consent
+
+    Args:
+        token_path: Path to token.json (created/updated as needed)
+        credentials_path: Path to OAuth client credentials.json
+
+    Returns:
+        google.oauth2.credentials.Credentials with all GOOGLE_SCOPES granted
+    """
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from google.auth.transport.requests import Request
+
+    creds = None
+    if os.path.exists(token_path):
+        try:
+            creds = Credentials.from_authorized_user_file(token_path, GOOGLE_SCOPES)
+        except Exception:
+            creds = None
+
+    # Detect scope drift: if existing token was minted with a narrower set,
+    # force re-auth so the new token covers everything in GOOGLE_SCOPES.
+    if creds and creds.scopes:
+        missing = set(GOOGLE_SCOPES) - set(creds.scopes)
+        if missing:
+            log_warn(f"token.json missing scopes: {sorted(missing)} — re-auth required")
+            creds = None
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            try:
+                creds.refresh(Request())
+            except Exception as e:
+                log_warn(f"Token refresh failed ({e}) — re-running OAuth flow")
+                creds = None
+        if not creds or not creds.valid:
+            flow = InstalledAppFlow.from_client_secrets_file(credentials_path, GOOGLE_SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open(token_path, 'w') as f:
+            f.write(creds.to_json())
+
+    return creds

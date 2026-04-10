@@ -3,6 +3,17 @@
 Auto-generated from `docs/changelog.json` by `execution/changelog_manager.py`.
 Do not edit manually.
 
+## 2026-04-10
+
+### Fixes
+
+- **[HIGH]** PSI scoring silently failed: website_evaluator CLI never wired up OAuth bearer token, fell through to unauthenticated pu -- `execution/website_evaluator.py`
+- **[MEDIUM]** gmaps_sheets_exporter cold_email tab missing lcp_seconds (load speed) column — data was in JSON but never written. Added -- `execution/gmaps_sheets_exporter.py`
+
+### Refactors
+
+- Single shared get_google_credentials() in utils.py + GOOGLE_SCOPES constant. Migrated gmaps_sheets_exporter, google_shee -- `execution/utils.py`, `execution/website_evaluator.py`, `execution/gmaps_sheets_exporter.py`, `execution/google_sheets_exporter.py`, `execution/enrich_200iq_lists.py`
+
 ## 2026-02-26
 
 ### Fixes

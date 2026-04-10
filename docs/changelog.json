@@ -337,6 +337,39 @@
         "setup",
         "onboarding"
       ]
+    },
+    {
+      "id": "20260410_071953_001",
+      "timestamp": "2026-04-10T07:19:53Z",
+      "type": "refactor",
+      "summary": "Single shared get_google_credentials() in utils.py + GOOGLE_SCOPES constant. Migrated gmaps_sheets_exporter, google_shee",
+      "files_changed": [
+        "execution/utils.py",
+        "execution/website_evaluator.py",
+        "execution/gmaps_sheets_exporter.py",
+        "execution/google_sheets_exporter.py",
+        "execution/enrich_200iq_lists.py"
+      ]
+    },
+    {
+      "id": "20260410_071957_001",
+      "timestamp": "2026-04-10T07:19:57Z",
+      "type": "fix",
+      "summary": "PSI scoring silently failed: website_evaluator CLI never wired up OAuth bearer token, fell through to unauthenticated pu",
+      "files_changed": [
+        "execution/website_evaluator.py"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "20260410_072153_001",
+      "timestamp": "2026-04-10T07:21:53Z",
+      "type": "fix",
+      "summary": "gmaps_sheets_exporter cold_email tab missing lcp_seconds (load speed) column — data was in JSON but never written. Added",
+      "files_changed": [
+        "execution/gmaps_sheets_exporter.py"
+      ],
+      "severity": "medium"
     }
   ]
 }
