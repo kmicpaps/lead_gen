@@ -99,21 +99,26 @@ def main():
     qa_warnings = {}
 
     for lead in leads:
-        email = (lead.get("emails") or [None])[0] if isinstance(lead.get("emails"), list) else lead.get("email_1", "")
+        # Email: handle array (GMaps), email_1 (scored CSV), or email (ecom/Apollo)
+        email = None
+        if isinstance(lead.get("emails"), list) and lead["emails"]:
+            email = lead["emails"][0]
+        else:
+            email = lead.get("email_1", "") or lead.get("email", "")
         if not email:
             continue
 
         rows.append({
             "email": email,
-            "company_name": lead.get("business_name", ""),
-            "casual_name": lead.get("casual_name", lead.get("business_name", "")),
-            "icebreaker": lead.get("insight_lv", ""),
+            "company_name": lead.get("business_name", "") or lead.get("shop_name", "") or lead.get("company_name", ""),
+            "casual_name": lead.get("casual_name", "") or lead.get("casual_org_name", "") or lead.get("business_name", "") or lead.get("shop_name", ""),
+            "icebreaker": lead.get("insight_lv", "") or lead.get("icebreaker", ""),
             "niche": lead.get("niche", ""),
             "city": lead.get("city", ""),
-            "score": str(lead.get("overall_score", "")),
+            "score": str(lead.get("overall_score", "") or lead.get("pagespeed_score", "")),
             "segment": lead.get("segment_id", ""),
-            "website": lead.get("website", ""),
-            "phone": lead.get("phone", ""),
+            "website": lead.get("website", "") or lead.get("company_website", "") or (("https://" + lead["domain_name"]) if lead.get("domain_name") else ""),
+            "phone": lead.get("phone", "") or "",
         })
 
         if args.qa:

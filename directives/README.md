@@ -10,6 +10,7 @@ Directives are living documents. Update them when you discover API constraints, 
 | Directive | Purpose |
 |-----------|---------|
 | `lead_generation_v5_optimized.md` | Main lead gen pipeline: Apollo scrapers -> merge -> dedup -> filter -> Sheets |
+| `backup_apollo_pipeline.md` | **Backup** Apollo route (usamamern + Apify email finders + MillionVerifier) -- use when primary scrapers fail; ~$6-10/1K leads |
 | `apollo_url_crafter.md` | AI-assisted Apollo URL construction from natural language descriptions |
 | `lead_quality_filtering.md` | Analyze scraped leads and apply user-chosen filters (email, phone, title, industry) |
 | `gmaps_lead_generation.md` | Google Maps scraping pipeline with website contact extraction |
@@ -26,6 +27,12 @@ Directives are living documents. Update them when you discover API constraints, 
 | `enrich_icebreakers.md` | AI-generated personalized icebreaker lines from website scraping |
 | `enrich_casual_org_names.md` | Convert formal corporate names to casual/friendly versions |
 | `fix_name_diacritics.md` | Restore Baltic/Slavic diacritics from LinkedIn URL slugs |
+
+## Research
+
+| Directive | Purpose |
+|-----------|---------|
+| `deep_research.md` | Structured deep dive research on any topic, prioritizing practitioner insights over marketing content |
 
 ## Sales & Outreach
 

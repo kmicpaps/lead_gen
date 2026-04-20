@@ -43,6 +43,15 @@ def get_company_website(lead):
     website_value = lead.get('company_website', '') or lead.get('website_url', '')
     website = website_value.strip() if website_value else ''
 
+    # If empty, try domain_name (ecom/Shopify leads)
+    if not website:
+        domain = lead.get('domain_name', '')
+        if domain and domain.strip():
+            domain = domain.strip()
+            if not domain.startswith('http'):
+                domain = 'https://' + domain
+            website = domain
+
     # If empty, try nested org_name object (B2B finder raw format)
     if not website and 'org_name' in lead:
         org_name_obj = lead.get('org_name', {})

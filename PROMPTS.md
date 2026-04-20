@@ -78,6 +78,7 @@ Note: Google Maps gives you **business-level contacts** (company phone, website,
 | Command | What it does | Claude asks for |
 |---------|-------------|-----------------|
 | `/new-apollo-list` | Scrape + dedup + filter + export | client, Apollo URL, target count |
+| `/apollo-backup` | **Backup** Apollo route (usamamern+Apify stack, ~$6-10/1K) — when primary fails or for niche/verified-only runs | client, Apollo URL, country |
 | `/find-more-leads` | Rescrape, only return new leads | client, Apollo URL |
 | `/gmaps-leads` | Google Maps local business scraping | client, location, niches |
 | `/build-apollo-url` | Build Apollo URL from description | who you want to target |

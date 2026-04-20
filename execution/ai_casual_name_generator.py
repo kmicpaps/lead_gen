@@ -140,10 +140,10 @@ def enrich_single_lead(lead, ai_provider, api_key, rate_limiter):
     Enrich a single lead with casual org name.
     Returns: updated lead
     """
-    # Handle both company_name (string) and org_name (object) formats
-    company_name = lead.get('company_name', '')
+    # Handle company_name, shop_name (ecom), and org_name (B2B finder) formats
+    company_name = lead.get('company_name', '') or lead.get('shop_name', '')
 
-    # If company_name is empty, try org_name (B2B finder format)
+    # If still empty, try org_name (B2B finder format)
     if not company_name and 'org_name' in lead:
         org_name_obj = lead.get('org_name', {})
         if isinstance(org_name_obj, dict):
@@ -230,7 +230,7 @@ def enrich_leads_concurrent(leads, ai_provider, api_key, force_regenerate=False)
     """
     # Helper function to check if lead has company info
     def has_company_info(lead):
-        if lead.get('company_name'):
+        if lead.get('company_name') or lead.get('shop_name'):
             return True
         org_name = lead.get('org_name', {})
         if isinstance(org_name, dict) and org_name.get('name'):
@@ -339,7 +339,7 @@ def main():
 
         # Count leads with company names (handle both formats)
         def has_company_info(lead):
-            if lead.get('company_name'):
+            if lead.get('company_name') or lead.get('shop_name'):
                 return True
             org_name = lead.get('org_name', {})
             if isinstance(org_name, dict) and org_name.get('name'):
