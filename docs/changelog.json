@@ -370,6 +370,31 @@
         "execution/gmaps_sheets_exporter.py"
       ],
       "severity": "medium"
+    },
+    {
+      "id": "20260924_134333_001",
+      "timestamp": "2026-09-24T13:43:33Z",
+      "type": "fix",
+      "summary": "Olympus + PeakyDev Apify actors changed schema (Sep 2026): Olympus is now [NO COOKIES] with structured filters (searchUr",
+      "files_changed": [
+        "execution/scraper_olympus_b2b_finder.py",
+        "execution/scraper_peakydev.py",
+        "execution/scraper_registry.py",
+        "execution/lead_normalizer.py"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "20260924_171035_001",
+      "timestamp": "2026-09-24T17:10:35Z",
+      "type": "fix",
+      "summary": "France support + CodeCrafter recovery: added FR to verify_country COUNTRY_CONFIG (was 'unknown_country_code', rejected a",
+      "files_changed": [
+        "execution/verify_country.py",
+        "execution/lead_normalizer.py",
+        "execution/scraper_registry.py"
+      ],
+      "severity": "medium"
     }
   ]
 }

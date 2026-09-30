@@ -1,361 +1,294 @@
-# [CLI] — run via: py execution/scraper_olympus_b2b_finder.py --help
+# [CLI] : run via: py execution/scraper_olympus_b2b_finder.py --help
 """
 Apify B2B Leads Finder Scraper (olympus/b2b-leads-finder)
 
-This scraper replaces the RapidAPI Apollo scraper with a more robust Apify-based solution.
+Since ~Sep 2026 the actor is "[NO COOKIES]": it NO LONGER accepts an Apollo
+searchUrl or cookies. Any searchUrl sent is silently ignored and the actor
+scrapes its whole database (~133M leads). It now takes structured filters
+(seniority, companyCountry, industry, webKeywords, ...), same shape as PeakyDev.
 
-Features:
-- Automatic progress tracking (resumes from last page)
-- Built-in email enrichment (~60% coverage)
-- Single cookie array format (EditThisCookie export)
-- $1/1k leads for paid Apify users
+This script parses the Apollo URL, maps it to those fields, and validates every
+value against the actor's LIVE input schema before starting a run. If any value
+doesn't map, or no real filter survives, it refuses to run (exit 3) rather than
+scrape unfiltered.
+
+Emails: the actor has no email-status filter. Output emails equal the
+`emailPatternGuess` field, i.e. pattern-guessed, NOT Apollo-verified.
+Normalized leads get email_status='guessed' so downstream steps know.
+
+Old version (searchUrl + cookies): execution/_archived/scraper_olympus_b2b_finder_v1_searchurl.py
 
 Usage:
-    python execution/run_apify_b2b_leads_finder.py \
-        --apollo-url "https://app.apollo.io/#/people?..." \
-        --max-leads 2000 \
-        --output-dir .tmp/b2b_finder \
-        --output-prefix b2b_leads
+    py execution/scraper_olympus_b2b_finder.py --apollo-url "..." --max-leads 1000 --dry-run
+    py execution/scraper_olympus_b2b_finder.py --apollo-url "..." --max-leads 1000 \
+        --output-dir .tmp/b2b_finder --output-prefix b2b_leads
 """
 
 import os
 import sys
 import json
 import argparse
-import time
+import requests
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse, unquote
 from apify_client import ApifyClient
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from utils import save_json
+from apollo_url_parser import parse_apollo_url
 
-# Note: We manually load env vars to avoid load_dotenv() parsing errors with multiline JSON cookie
-# The APOLLO_COOKIE is manually parsed from .env file
-# APIFY_API_KEY is accessed directly via os.getenv()
+ACTOR_ID = "olympus/b2b-leads-finder"
+MIN_RESULTS = 100  # actor rejects maxResults < 100
 
-def detect_country_from_url(apollo_url):
-    """
-    Auto-detect country code from Apollo URL.
-    B2B Finder requires country to match your Apollo account location.
-    For Nordic/Baltic countries, we'll default to SE (Sweden) as it's a common Apollo account location.
-    """
+
+def load_apify_key():
+    """Read APIFY_API_KEY from .env manually (load_dotenv chokes on multiline APOLLO_COOKIE)."""
     try:
-        parsed = urlparse(apollo_url)
-        query_params = parse_qs(parsed.fragment.split('?')[1] if '?' in parsed.fragment else '')
+        with open('.env', 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('APIFY_API_KEY='):
+                    return line.split('=', 1)[1].strip()
+    except FileNotFoundError:
+        pass
+    return os.getenv('APIFY_API_KEY')
 
-        # Extract locations from personLocations parameter
-        locations = query_params.get('personLocations[]', [])
 
-        if not locations:
-            return 'US'  # Default to US if no location specified
+def fetch_input_schema(api_key):
+    """Fetch the actor's current input schema (free API call) -> properties dict."""
+    base = "https://api.apify.com/v2"
+    act = requests.get(f"{base}/acts/{ACTOR_ID.replace('/', '~')}",
+                       params={'token': api_key}, timeout=30).json()['data']
+    build_id = act['taggedBuilds']['latest']['buildId']
+    build = requests.get(f"{base}/actor-builds/{build_id}",
+                         params={'token': api_key}, timeout=30).json()['data']
+    schema = build.get('inputSchema') or build.get('actorDefinition', {}).get('input')
+    if isinstance(schema, str):
+        schema = json.loads(schema)
+    return schema['properties']
 
-        # Decode URL-encoded locations
-        locations = [unquote(loc).strip().lower() for loc in locations]
 
-        # Country mapping for common Apollo searches
-        country_map = {
-            'united states': 'US',
-            'usa': 'US',
-            'us': 'US',
-            'estonia': 'EE',
-            'lithuania': 'LT',
-            'latvia': 'LV',
-            'finland': 'FI',
-            'sweden': 'SE',
-            'norway': 'NO',
-            'denmark': 'DK',
-            'poland': 'PL',
-            'germany': 'DE',
-            'united kingdom': 'GB',
-            'uk': 'GB',
-            'france': 'FR',
-            'spain': 'ES',
-            'italy': 'IT',
-            'netherlands': 'NL',
-        }
+def enum_for(props, field):
+    """Allowed values for an array/select field, or None for free-text fields."""
+    p = props.get(field, {})
+    items = p.get('items') if isinstance(p.get('items'), dict) else {}
+    return p.get('enum') or items.get('enum')
 
-        # Check each location for a match
-        for location in locations:
-            for country_name, code in country_map.items():
-                if country_name in location:
-                    return code
 
-        return 'US'  # Final fallback
-    except Exception:
-        return 'US'
+def match_enum(values, allowed, field, errors):
+    """Case-insensitive match of values to the schema enum. Unmatched -> errors."""
+    lookup = {a.lower(): a for a in allowed}
+    out = []
+    for v in values:
+        hit = lookup.get(v.strip().lower())
+        if hit:
+            if hit not in out:
+                out.append(hit)
+        else:
+            errors.append(f"{field}: '{v}' is not an accepted value")
+    return out
 
-def normalize_apollo_url(apollo_url):
-    """
-    Normalize Apollo URL by cleaning up malformed parameters.
-    Fixes issues like trailing spaces in URL parameters.
-    """
-    try:
-        # URL-decode and re-encode to fix encoding issues
-        parsed = urlparse(apollo_url)
 
-        if '?' not in parsed.fragment:
-            return apollo_url
+def map_company_size(apollo_sizes, allowed, errors):
+    """Apollo '11,50' / '10001,' -> actor '11 - 50' / '10001+'."""
+    out = []
+    for s in apollo_sizes:
+        lo, _, hi = s.partition(',')
+        label = f"{lo.strip()}+" if not hi.strip() else f"{lo.strip()} - {hi.strip()}"
+        if label in allowed:
+            if label not in out:
+                out.append(label)
+        else:
+            errors.append(f"companyEmployeeSize: Apollo range '{s}' has no exact match in {allowed}")
+    return out
 
-        base, query = parsed.fragment.split('?', 1)
-        query_params = parse_qs(query)
 
-        # Clean up parameter values (remove trailing spaces, normalize)
-        cleaned_params = {}
-        for key, values in query_params.items():
-            cleaned_values = [unquote(v).strip() for v in values]
-            cleaned_params[key] = cleaned_values
+def build_run_input(apollo_filters, max_leads, props):
+    """Map parsed Apollo filters to actor input. Returns (run_input, errors, warnings)."""
+    errors, warnings = [], []
+    run_input = {'maxResults': max(MIN_RESULTS, max_leads)}
 
-        # Rebuild query string
-        from urllib.parse import urlencode
-        new_query = urlencode(cleaned_params, doseq=True)
-        new_fragment = f"{base}?{new_query}"
+    if apollo_filters.get('seniority'):
+        run_input['seniority'] = match_enum(apollo_filters['seniority'],
+                                            enum_for(props, 'seniority'), 'seniority', errors)
+    if apollo_filters.get('org_locations'):
+        run_input['companyCountry'] = match_enum(apollo_filters['org_locations'],
+                                                 enum_for(props, 'companyCountry'), 'companyCountry', errors)
+    if apollo_filters.get('locations'):
+        run_input['personCountry'] = match_enum(apollo_filters['locations'],
+                                                enum_for(props, 'personCountry'), 'personCountry', errors)
+    if apollo_filters.get('industries'):
+        if apollo_filters.get('industries_unresolved'):
+            errors.append(f"industry: unresolved Apollo IDs {apollo_filters['industries_unresolved']} "
+                          f"(add with apollo_industry_resolver.py --add)")
+        run_input['industry'] = match_enum(apollo_filters.get('industries_resolved', []),
+                                           enum_for(props, 'industry'), 'industry', errors)
+    if apollo_filters.get('keywords'):
+        # Dedup case-insensitively, keep first spelling
+        seen, kws = set(), []
+        for k in apollo_filters['keywords']:
+            if k.strip().lower() not in seen:
+                seen.add(k.strip().lower())
+                kws.append(k.strip())
+        run_input['webKeywords'] = kws[:100]
+    if apollo_filters.get('titles'):
+        run_input['personTitle'] = [t.strip() for t in apollo_filters['titles']][:100]
+    if apollo_filters.get('company_size'):
+        run_input['companyEmployeeSize'] = map_company_size(apollo_filters['company_size'],
+                                                            enum_for(props, 'companyEmployeeSize'), errors)
 
-        # Reconstruct URL
-        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}#{new_fragment}"
-    except Exception:
-        # If normalization fails, return original URL
-        return apollo_url
+    # Filters the actor cannot apply
+    if apollo_filters.get('email_status'):
+        warnings.append(f"email status {apollo_filters['email_status']} NOT supported: "
+                        f"output emails are pattern guesses, not verified")
+    if apollo_filters.get('revenue'):
+        warnings.append("revenue filter not mapped (actor uses fixed buckets), dropped")
+    if apollo_filters.get('functions'):
+        warnings.append("department/function filter not mapped, dropped")
+
+    # Any field the schema doesn't know means the actor changed again
+    for field in run_input:
+        if field not in props:
+            errors.append(f"field '{field}' no longer exists in actor schema")
+
+    # Safety: never scrape with location as the only filter
+    narrowing = [f for f in ('seniority', 'industry', 'webKeywords', 'personTitle', 'companyEmployeeSize')
+                 if run_input.get(f)]
+    if not narrowing:
+        errors.append("no narrowing filter survived mapping (only location/none), refusing to scrape")
+
+    return run_input, errors, warnings
+
 
 def normalize_lead_to_schema(lead):
-    """
-    Normalize B2B Leads Finder output to standardized schema.
-    Preserves organization data (industry, keywords, etc.) that Apollo provides.
-    """
-    org = lead.get('organization', {}) or {}
-    industries = org.get('industries', []) or []
-    keywords = org.get('keywords', []) or []
-
+    """Normalize new-format (camelCase, organization*) actor output to standard schema."""
+    first = lead.get('firstName') or ''
+    last = lead.get('lastName') or ''
+    email = lead.get('email') or ''
+    guess = lead.get('emailPatternGuess') or ''
+    website = lead.get('organizationWebsite') or ''
+    if website and not website.startswith('http'):
+        website = f"https://{website}"
+    keywords = lead.get('organizationKeywords') or []
     return {
-        'first_name': lead.get('first_name', ''),
-        'last_name': lead.get('last_name', ''),
-        'name': lead.get('name') or f"{lead.get('first_name', '')} {lead.get('last_name', '')}".strip(),
-        'organization_phone': lead.get('organization_phone') or lead.get('phone', '') or org.get('phone', ''),
-        'linkedin_url': lead.get('linkedin_url', ''),
-        'title': lead.get('title', ''),
-        'email_status': lead.get('email_status', 'unknown'),
-        'email': lead.get('email', ''),
-        'city': lead.get('city', ''),
-        'country': lead.get('country', ''),
-        'org_name': lead.get('organization_name') or org.get('name', ''),
-        'website_url': lead.get('website_url') or org.get('website_url', ''),
-        'industry': industries[0].title() if industries else '',
-        'org_keywords': keywords[:10] if keywords else [],
-        'org_linkedin': org.get('linkedin_url', ''),
-        'org_facebook': org.get('facebook_url', ''),
-        'org_employee_count': org.get('estimated_num_employees'),
-        'org_founded_year': org.get('founded_year'),
-        'seniority': lead.get('seniority', ''),
-        'departments': lead.get('departments', []),
-        'headline': lead.get('headline', ''),
+        'first_name': first,
+        'last_name': last,
+        'name': f"{first} {last}".strip(),
+        'organization_phone': lead.get('organizationPhone') or lead.get('phone') or '',
+        'linkedin_url': lead.get('linkedinUrl') or '',
+        'title': lead.get('title') or '',
+        'email_status': 'guessed' if email and email == guess else ('unknown' if email else ''),
+        'email': email,
+        'city': lead.get('city') or '',
+        'state': lead.get('state') or '',
+        'country': lead.get('country') or '',
+        'org_name': lead.get('organizationName') or '',
+        'company_name': lead.get('organizationName') or '',
+        'website_url': website,
+        'company_domain': (lead.get('organizationWebsite') or '').replace('https://', '').replace('http://', '').strip('/'),
+        'industry': lead.get('organizationIndustry') or '',
+        'org_keywords': keywords[:10],
+        'org_linkedin': lead.get('organizationLinkedinUrl') or '',
+        'company_linkedin': lead.get('organizationLinkedinUrl') or '',
+        'org_employee_count': lead.get('organizationSize'),
+        'org_employee_range': lead.get('organizationEmployeeRange') or '',
+        'org_founded_year': lead.get('organizationFoundedYear'),
+        'company_city': lead.get('organizationCity') or '',
+        'company_country': lead.get('organizationCountry') or '',
+        'company_revenue': lead.get('organizationRevenue') or '',
+        'seniority': lead.get('seniority') or '',
+        'departments': [lead['department']] if lead.get('department') else [],
+        'headline': '',
         'source': 'olympus'
     }
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Apify B2B Leads Finder Scraper')
-    parser.add_argument('--apollo-url', required=True, help='Apollo search URL')
-    parser.add_argument('--max-leads', type=int, default=5000, help='Maximum leads to scrape')
+    parser = argparse.ArgumentParser(description='Apify B2B Leads Finder Scraper (structured filters)')
+    parser.add_argument('--apollo-url', required=True, help='Apollo search URL (parsed into filters)')
+    parser.add_argument('--max-leads', type=int, default=5000, help=f'Maximum leads (actor minimum {MIN_RESULTS})')
     parser.add_argument('--output-dir', default='.tmp/b2b_finder', help='Output directory')
     parser.add_argument('--output-prefix', default='b2b_leads', help='Output file prefix')
-    parser.add_argument('--country', default=None, help='Country code (ISO format, e.g., US, FI, EE). If not specified, auto-detected from Apollo URL.')
-
+    parser.add_argument('--country', default=None, help='Ignored (kept for orchestrator compatibility)')
+    parser.add_argument('--dry-run', action='store_true', help='Print the exact actor input and exit (no cost)')
     args = parser.parse_args()
 
-    # Manually load required env vars from .env file
-    apify_api_key = None
-    apollo_cookie = None
-
-    try:
-        with open('.env', 'r', encoding='utf-8') as f:
-            env_content = f.read()
-
-        # Parse simple key=value pairs for Apify API key
-        import re
-        for line in env_content.split('\n'):
-            line = line.strip()
-            if line and not line.startswith('#'):
-                if line.startswith('APIFY_API_KEY='):
-                    apify_api_key = line.split('=', 1)[1].strip()
-
-        # Validate Apify API key
-        if not apify_api_key:
-            print("Error: APIFY_API_KEY not found in .env", file=sys.stderr)
-            return 1
-
-        # Find APOLLO_COOKIE=[...] in the file
-        # Match from APOLLO_COOKIE=[ to the last ] on its own line
-        match = re.search(r'(?:^|\n)APOLLO_COOKIE=(\[.*?\])', env_content, re.DOTALL | re.MULTILINE)
-        if match:
-            apollo_cookie_str = match.group(1)
-
-            # Browser-exported cookies from EditThisCookie
-            # Try standard JSON parsing first
-            try:
-                apollo_cookie = json.loads(apollo_cookie_str)
-            except json.JSONDecodeError:
-                # If standard parsing fails, try fixing common issues
-                fixed_str = apollo_cookie_str.replace("'", '"')
-                try:
-                    apollo_cookie = json.loads(fixed_str)
-                except json.JSONDecodeError as e:
-                    # Try ast.literal_eval as fallback
-                    import ast
-                    try:
-                        apollo_cookie = ast.literal_eval(apollo_cookie_str)
-                    except Exception:
-                        # Last resort: Try json5
-                        try:
-                            import json5
-                            apollo_cookie = json5.loads(apollo_cookie_str)
-                        except Exception:
-                            print(f"Error: Could not parse APOLLO_COOKIE. JSON error: {e}", file=sys.stderr)
-                            print(f"Cookie string length: {len(apollo_cookie_str)}", file=sys.stderr)
-                            print(f"First 200 chars: {apollo_cookie_str[:200]}", file=sys.stderr)
-                            print("Please ensure APOLLO_COOKIE is valid JSON array format.", file=sys.stderr)
-                            return 1
-        else:
-            print("Error: APOLLO_COOKIE not found in .env", file=sys.stderr)
-            return 1
-    except Exception as e:
-        print(f"Error loading credentials from .env: {e}", file=sys.stderr)
+    apify_api_key = load_apify_key()
+    if not apify_api_key:
+        print("Error: APIFY_API_KEY not found in .env", file=sys.stderr)
         return 1
 
+    apollo_filters = parse_apollo_url(args.apollo_url)
     try:
-        # Auto-detect country if not specified
-        country = args.country if args.country else detect_country_from_url(args.apollo_url)
+        props = fetch_input_schema(apify_api_key)
+    except Exception as e:
+        print(f"Error: could not fetch actor input schema ({e}), refusing to run blind", file=sys.stderr)
+        return 1
 
-        # Normalize URL (clean up malformed parameters)
-        normalized_url = normalize_apollo_url(args.apollo_url)
+    run_input, errors, warnings = build_run_input(apollo_filters, args.max_leads, props)
 
-        print(f"Starting Apify B2B Leads Finder Scraper...")
-        print(f"Target leads: {args.max_leads}")
-        url_display = f"{normalized_url[:100]}..." if len(normalized_url) > 100 else normalized_url
-        print(f"Apollo URL: {url_display}")
-        print(f"Country: {country} (auto-detected)" if not args.country else f"Country: {country}")
+    print("Olympus actor input (validated against live schema):")
+    print(json.dumps(run_input, indent=2, ensure_ascii=False))
+    for w in warnings:
+        print(f"WARNING: {w}", file=sys.stderr)
+    if errors:
+        print("\nFILTER MAPPING FAILED, not starting a run:", file=sys.stderr)
+        for e in errors:
+            print(f"  - {e}", file=sys.stderr)
+        return 3
+    if args.dry_run:
+        print("\n[DRY RUN] Input valid. No run started.")
+        return 0
 
-        # Initialize Apify client
+    try:
         client = ApifyClient(apify_api_key)
-
-        # Prepare input for B2B Leads Finder
-        run_input = {
-            "searchUrl": normalized_url,  # Note: actor expects "searchUrl" not "url"
-            "cookies": apollo_cookie,  # Single array, not double-nested
-            "country": country,
-            "maxResults": args.max_leads
-        }
-
-        print("\nStarting Apify actor run...")
-        print(f"Actor: olympus/b2b-leads-finder")
-
-        # Start the actor (non-blocking) so we can save run ID immediately
-        started_run = client.actor("olympus/b2b-leads-finder").start(run_input=run_input)
+        print(f"\nStarting Apify actor run: {ACTOR_ID} (maxResults={run_input['maxResults']})")
+        started_run = client.actor(ACTOR_ID).start(run_input=run_input)
         run_id = started_run['id']
         print(f"Actor run ID: {run_id}")
 
         # Save run ID for recovery (if local process is killed, Apify run continues)
         run_id_file = Path(args.output_dir) / '.active_run.json'
-        save_json({'run_id': run_id, 'actor': 'olympus/b2b-leads-finder',
+        save_json({'run_id': run_id, 'actor': ACTOR_ID,
                    'started_at': datetime.now().isoformat()}, str(run_id_file), mkdir=True)
-        print(f"Run ID saved to: {run_id_file}")
 
-        # Wait for the actor to finish
         print("Waiting for actor to complete...")
         run = client.run(run_id).wait_for_finish()
-
-        # Clean up run ID file
         run_id_file.unlink(missing_ok=True)
-
         print(f"Status: {run['status']}")
-
-        # Check if run was successful
         if run['status'] != 'SUCCEEDED':
-            print(f"Error: Actor run failed with status: {run['status']}", file=sys.stderr)
-            if 'statusMessage' in run:
-                print(f"Status message: {run['statusMessage']}", file=sys.stderr)
-            return 1
+            print(f"Error: Actor run ended with status {run['status']}: {run.get('statusMessage', '')}",
+                  file=sys.stderr)
+            # Keep partial data if the run was cut short (e.g. budget cap), fail otherwise
+            if run['status'] not in ('ABORTED', 'TIMED-OUT'):
+                return 1
 
-        # Fetch results from the actor's dataset
-        print("\nDownloading results...")
         dataset_items = list(client.dataset(run['defaultDatasetId']).iterate_items())
-
-        if not dataset_items:
-            print("Warning: No leads returned from B2B Leads Finder", file=sys.stderr)
-            print("This could mean:")
-            print("  - Filters are too restrictive")
-            print("  - Cookie expired")
-            print("  - Search URL returned no results")
-            return 1
-
-        # Check for session validation errors in dataset (cookie failures)
-        cookie_validation_failed = False
-        for item in dataset_items[:10]:  # Check first 10 items
-            item_str = str(item).lower()
-            if any(error in item_str for error in [
-                'session validation failed',
-                'resurrect the run',
-                'cookie expired',
-                'authentication failed',
-                'login required',
-                'please log in'
-            ]):
-                cookie_validation_failed = True
-                break
-
-        if cookie_validation_failed:
-            print("\n" + "="*70, file=sys.stderr)
-            print("🚫 COOKIE VALIDATION FAILED", file=sys.stderr)
-            print("="*70, file=sys.stderr)
-            print("", file=sys.stderr)
-            print("The Apollo session cookie has expired.", file=sys.stderr)
-            print("", file=sys.stderr)
-            print("ACTION REQUIRED:", file=sys.stderr)
-            print("1. Log into Apollo: https://app.apollo.io", file=sys.stderr)
-            print("2. Export fresh cookies using EditThisCookie extension", file=sys.stderr)
-            print("3. Update APOLLO_COOKIE in .env file", file=sys.stderr)
-            print("4. Re-run the scraper", file=sys.stderr)
-            print("", file=sys.stderr)
-            print("="*70, file=sys.stderr)
-            return 2  # Special exit code for cookie failures
-
-        # Check for suspiciously low results (possible cookie issue)
-        if len(dataset_items) < max(10, args.max_leads * 0.01):  # Less than 1% of requested (min 10)
-            print(f"\n⚠️  Warning: Got only {len(dataset_items)} leads (requested {args.max_leads})", file=sys.stderr)
-            print("This may indicate a cookie validation issue.", file=sys.stderr)
-            print("If this persists, refresh your Apollo cookies.", file=sys.stderr)
-
-        # Filter out status/notification messages from actor output
-        junk_patterns = ['\U0001f440', '\u23f3', '\U0001f4c8', '\U0001f7e2', 'Actor speed', 'Scanning pages',
-                         'enhance scraping', 'check the log', 'bear with us']
-        real_leads = [item for item in dataset_items
-                      if not any(p in str(item.get('name', '')) for p in junk_patterns)]
+        # Drop status/notification rows (e.g. {"firstName": "Check the log ..."})
+        real_leads = [i for i in dataset_items if i.get('employee_id') or i.get('email') or i.get('organizationName')]
         if len(real_leads) < len(dataset_items):
             print(f"Filtered out {len(dataset_items) - len(real_leads)} status messages from actor output")
-        print(f"Downloaded {len(real_leads)} leads")
+        if not real_leads:
+            print("Warning: No leads returned (filters too narrow?)", file=sys.stderr)
+            return 1
 
-        # Normalize leads to standardized schema
         normalized_leads = [normalize_lead_to_schema(lead) for lead in real_leads]
 
-        # Save results
         os.makedirs(args.output_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{args.output_prefix}_{timestamp}_{len(normalized_leads)}leads.json"
-        filepath = os.path.join(args.output_dir, filename)
-
+        filepath = os.path.join(args.output_dir,
+                                f"{args.output_prefix}_{timestamp}_{len(normalized_leads)}leads.json")
         save_json(normalized_leads, filepath)
 
-        print(f"Successfully scraped {len(normalized_leads)} leads from Apify B2B Leads Finder.")
-        print(f"Note: Requested {args.max_leads}, got {len(normalized_leads)}")
-        print(filepath)  # Print filepath to stdout for caller to capture
-
+        print(f"Successfully scraped {len(normalized_leads)} leads (requested {run_input['maxResults']}).")
+        print(filepath)  # Last stdout line = filepath, captured by the orchestrator
         return 0
 
     except KeyboardInterrupt:
-        print("\nScraping interrupted by user.", file=sys.stderr)
+        print("\nInterrupted locally. The Apify run continues; see .active_run.json for its ID.", file=sys.stderr)
         return 1
     except Exception as e:
-        print(f"Error running Apify B2B Leads Finder: {e}", file=sys.stderr)
+        print(f"Error running {ACTOR_ID}: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         return 1

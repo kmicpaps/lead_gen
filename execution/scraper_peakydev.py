@@ -36,39 +36,37 @@ def map_apollo_to_peakydev(apollo_filters):
     """
     Map Apollo filters to peakydev/leads-scraper-ppe input schema.
 
-    Peakydev ACTUAL input schema (verified via Apify docs 2026-02-25):
+    Peakydev input schema (live schema checked 2026-09-24, actor build 0.1.299):
     {
-        "businessModel": ["Product"],                           # Business model filter
-        "companyCountry": ["United Kingdom"],                   # Company HQ country
-        "companyEmployeeSize": ["0 - 1", "11 - 50", "51 - 200"], # Employee ranges
-        "contactEmailStatus": "verified",                       # Email verification status
-        "functional": ["Fraud"],                                # Department/function
-        "fundingFromDate": "2026-02-25",                        # Funding date range
-        "fundingToDate": "2026-02-26",
-        "fundingType": ["Venture Round"],                       # Funding type
-        "includeEmails": true,                                  # Include email addresses
-        "industry": ["Construction Hardware Manufacturing"],     # Industry text names (V2 taxonomy)
-        "industryKeywords": ["construction"],                   # Keyword search
-        "personCountry": ["Sweden"],                            # Person's home country
-        "personTitle": ["ceo"],                                 # Job title filter (lowercase)
-        "revenue": ["< 1M"],                                    # Revenue range
-        "seniority": ["CEO", "Founder", "Director", ...],       # Seniority levels
-        "totalResults": 1000
+        "totalResults": 1000,                                   # min 100, max 50000
+        "companyCountry": ["France"],                           # Company HQ country
+        "personCountry": ["France"],                            # Person's home country
+        "companyEmployeeSize": ["11 - 50", "51 - 200"],         # 1 - 10 ... 10001+
+        "seniority": ["owner", "founder", "c_suite", ...],      # Apollo's lowercase values
+        "personTitle": ["ceo"],                                 # Job title filter
+        "industry": ["Construction"],                           # Industry text names
+        "webKeywords": ["hvac"],                                # Company keywords
+        "revenue": ["500K-10M"]                                 # < 500K ... 1B+
     }
+    No email-status filter any more; enforce --require-email afterwards.
     """
 
+    # SCHEMA UPDATE 2026-09-21 (actor build 0.1.299): includeEmails, contactEmailStatus,
+    # industryKeywords, functional, fundingType and businessModel were REMOVED.
+    # Keywords now go in webKeywords; seniority uses Apollo's own lowercase values;
+    # there is no email-status filter any more (post-filter with lead_filter.py --require-email).
     peakydev_input = {
-        "includeEmails": True,  # Always get emails
         "totalResults": 1000  # Will be overridden by caller
     }
 
     # Map company size to companyEmployeeSize (different format than Apollo)
     if apollo_filters.get('company_size'):
         # Apollo uses granular or broad ranges; PeakyDev has fixed buckets:
-        # "0 - 1", "2 - 10", "11 - 50", "51 - 200", "201 - 500",
-        # "501 - 1000", "1001 - 5000", "5001 - 10000", "10000+"
+        # "1 - 10", "11 - 50", "51 - 200", "201 - 500",
+        # "501 - 1000", "1001 - 5000", "5001 - 10000", "10001+"
         size_map = {
-            '1,10': '2 - 10',
+            '0,1': '1 - 10',
+            '1,10': '1 - 10',
             '11,20': '11 - 50',
             '11,50': '11 - 50',
             '21,50': '11 - 50',
@@ -81,8 +79,9 @@ def map_apollo_to_peakydev(apollo_filters):
             '1001,5000': '1001 - 5000',
             '2001,5000': '1001 - 5000',
             '5001,10000': '5001 - 10000',
-            '10001': '10000+',
-            '10001+': '10000+',
+            '10001': '10001+',
+            '10001,': '10001+',
+            '10001+': '10001+',
         }
         mapped_sizes = []
         for size in apollo_filters['company_size']:
@@ -92,11 +91,6 @@ def map_apollo_to_peakydev(apollo_filters):
                 continue
             if mapped_size not in mapped_sizes:
                 mapped_sizes.append(mapped_size)
-
-        # Add "0 - 1" only if Apollo filter explicitly includes 0-1 range
-        if any(s in ['0,1'] for s in apollo_filters['company_size']):
-            if '0 - 1' not in mapped_sizes:
-                mapped_sizes.insert(0, '0 - 1')
 
         peakydev_input['companyEmployeeSize'] = mapped_sizes
 
@@ -133,34 +127,24 @@ def map_apollo_to_peakydev(apollo_filters):
 
     # Map seniority levels
     if apollo_filters.get('seniority'):
-        # PeakyDev seniority values (from Apify schema)
-        seniority_map = {
-            'founder': 'Founder',
-            'owner': 'Founder',      # Apollo "Owner" → PeakyDev "Founder"
-            'c_suite': 'CXO',
-            'vp': 'Vice President',
-            'director': 'Director',
-            'manager': 'Manager',
-            'head': 'Head',
-            'partner': 'Chairman',    # Closest match
-            'senior': 'Senior',
-            'entry': 'Entry Level',
-            'trainee': 'Junior',
-            'executive': 'Executive',
-            'president': 'President',
-        }
+        # PeakyDev now uses Apollo's own seniority values (lowercase)
+        allowed_seniority = {'owner', 'founder', 'c_suite', 'partner', 'vp', 'head',
+                             'director', 'manager', 'senior', 'entry', 'intern'}
+        alias = {'trainee': 'intern'}
         mapped_seniority = []
         for s in apollo_filters['seniority']:
-            mapped = seniority_map.get(s.lower(), s)
+            mapped = alias.get(s.lower(), s.lower())
+            if mapped not in allowed_seniority:
+                print(f"  WARNING: Unknown seniority '{s}', skipping", file=sys.stderr)
+                continue
             if mapped not in mapped_seniority:
                 mapped_seniority.append(mapped)
         peakydev_input['seniority'] = mapped_seniority
 
-    # Map email status
+    # Email status: no longer supported by the actor
     if apollo_filters.get('email_status'):
-        # Apollo: ["verified"] → PeakyDev: "verified"
-        if 'verified' in [s.lower() for s in apollo_filters['email_status']]:
-            peakydev_input['contactEmailStatus'] = 'verified'
+        print(f"  NOTE: email status {apollo_filters['email_status']} not supported by PeakyDev, "
+              f"enforce afterwards (lead_filter.py --require-email)", file=sys.stderr)
 
     # Map revenue (Apollo min/max → PeakyDev range strings)
     if apollo_filters.get('revenue'):
@@ -178,15 +162,15 @@ def map_apollo_to_peakydev(apollo_filters):
             max_rev = 0
             print(f"  WARNING: Non-numeric revenue max '{revenue.get('max')}', defaulting to 0", file=sys.stderr)
 
-        # Map Apollo min/max to PeakyDev bucket strings
+        # Map Apollo min/max to PeakyDev bucket strings (schema 2026-09-21)
         buckets = [
-            (0, 1000000, '< 1M'),
-            (1000000, 10000000, '1M - 10M'),
-            (10000000, 50000000, '10M - 50M'),
-            (50000000, 100000000, '50M - 100M'),
-            (100000000, 500000000, '100M - 500M'),
-            (500000000, 1000000000, '500M - 1B'),
-            (1000000000, float('inf'), '> 1B'),
+            (0, 500000, '< 500K'),
+            (500000, 10000000, '500K-10M'),
+            (10000000, 50000000, '10M-50M'),
+            (50000000, 100000000, '50M-100M'),
+            (100000000, 500000000, '100M-500M'),
+            (500000000, 1000000000, '500M-1B'),
+            (1000000000, float('inf'), '1B+'),
         ]
         for low, high, label in buckets:
             # Include bucket if it overlaps with the min/max range
@@ -201,20 +185,21 @@ def map_apollo_to_peakydev(apollo_filters):
         if revenue_ranges:
             peakydev_input['revenue'] = revenue_ranges
 
-    # Map funding type
+    # Funding and functions: fields removed from the actor, dropped
     if apollo_filters.get('funding'):
-        # Apollo funding types map directly to PeakyDev (same names)
-        peakydev_input['fundingType'] = apollo_filters['funding']
-
-    # Map functions/departments
+        print("  NOTE: funding filter no longer supported by PeakyDev, dropped", file=sys.stderr)
     if apollo_filters.get('functions'):
-        peakydev_input['functional'] = apollo_filters['functions']
+        print("  NOTE: function/department filter not mapped for PeakyDev, dropped", file=sys.stderr)
 
-    # Map keywords to industryKeywords
+    # Map keywords to webKeywords (company keywords; max 100)
     apollo_keywords = apollo_filters.get('keywords', [])
     if apollo_keywords:
-        # Use keywords for industryKeywords field (deduplicate to avoid API error)
-        peakydev_input['industryKeywords'] = list(set(apollo_keywords))
+        seen, kws = set(), []
+        for k in apollo_keywords:  # case-insensitive dedup, keep order
+            if k.strip().lower() not in seen:
+                seen.add(k.strip().lower())
+                kws.append(k.strip())
+        peakydev_input['webKeywords'] = kws[:100]
 
     # Map resolved industry names to industry field
     # PeakyDev uses LinkedIn V2 taxonomy which differs from Apollo's V1 taxonomy.
@@ -276,6 +261,11 @@ def normalize_lead_to_schema(lead):
         'company_linkedin': lead.get('organizationLinkedinUrl', '') or lead.get('companyLinkedinUrl', ''),
         'company_domain': company_domain,
         'industry': lead.get('organizationIndustry', '') or lead.get('industry', ''),
+        'company_country': lead.get('organizationCountry', '') or '',
+        'company_city': lead.get('organizationCity', '') or '',
+        'org_keywords': (lead.get('organizationKeywords') or [])[:10],
+        'org_employee_count': lead.get('organizationSize'),
+        'seniority': lead.get('seniority', '') or '',
         'source': 'peakydev'
     }
 
@@ -360,17 +350,15 @@ def run_peakydev_scraper(apollo_url, max_leads, output_dir='.tmp/peakydev', outp
             return False, None, 0.0
 
         # Set result count
-        # NOTE: Peakydev requires minimum 1000 leads - cannot do 25-lead test
+        # NOTE: actor minimum is totalResults=100 (schema 2026-09-21; was 1000)
         if test_only:
-            # For test mode, use minimum 1000 leads (Peakydev requirement)
-            target_leads = 1000
+            target_leads = 100
             print(f"\n{'='*60}")
-            print(f"PEAKYDEV SCRAPER TEST (using 1000 leads - minimum required)")
+            print(f"PEAKYDEV SCRAPER TEST (100 leads - actor minimum)")
             print(f"{'='*60}")
-            print(f"WARNING: Peakydev requires minimum 1000 leads")
             print(f"Target leads: {target_leads} (minimum enforced)")
         else:
-            target_leads = max(1000, max_leads)  # Ensure minimum 1000
+            target_leads = max(100, max_leads)  # Ensure actor minimum
             print(f"\n{'='*60}")
             print(f"PEAKYDEV SCRAPER FULL RUN")
             print(f"{'='*60}")
@@ -425,6 +413,9 @@ def run_peakydev_scraper(apollo_url, max_leads, output_dir='.tmp/peakydev', outp
             print("Warning: No leads returned from peakydev scraper", file=sys.stderr)
             return False, None, 0.0
 
+        # Drop status/notification rows (e.g. {"firstName": "Check the log ..."})
+        dataset_items = [i for i in dataset_items
+                         if i.get('email') or i.get('organizationName') or i.get('linkedinUrl')]
         print(f"Downloaded {len(dataset_items)} leads")
 
         # Normalize leads to standardized schema

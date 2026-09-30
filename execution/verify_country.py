@@ -128,6 +128,16 @@ COUNTRY_CONFIG = {
         ],
         "neutral_tlds": [".com", ".eu", ".net", ".org", ".io", ".co"],
     },
+    "FR": {
+        "name": "France",
+        "tld": ".fr",
+        "phone": "+33",
+        "foreign_tlds": [
+            ".de", ".be", ".ch", ".es", ".it", ".nl", ".lu", ".uk", ".co.uk",
+            ".pt", ".at", ".pl", ".se", ".dk", ".ie", ".us", ".ca", ".ma", ".tn",
+        ],
+        "neutral_tlds": [".com", ".eu", ".net", ".org", ".io", ".co"],
+    },
 }
 
 

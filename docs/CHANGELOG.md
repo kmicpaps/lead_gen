@@ -3,6 +3,13 @@
 Auto-generated from `docs/changelog.json` by `execution/changelog_manager.py`.
 Do not edit manually.
 
+## 2026-09-24
+
+### Fixes
+
+- **[HIGH]** Olympus + PeakyDev Apify actors changed schema (Sep 2026): Olympus is now [NO COOKIES] with structured filters (searchUr -- `execution/scraper_olympus_b2b_finder.py`, `execution/scraper_peakydev.py`, `execution/scraper_registry.py`, `execution/lead_normalizer.py`
+- **[MEDIUM]** France support + CodeCrafter recovery: added FR to verify_country COUNTRY_CONFIG (was 'unknown_country_code', rejected a -- `execution/verify_country.py`, `execution/lead_normalizer.py`, `execution/scraper_registry.py`
+
 ## 2026-04-10
 
 ### Fixes

@@ -43,46 +43,47 @@ SCRAPER_REGISTRY = {
         "campaign_filename": "olympus_leads.json",
 
         # Limits
-        "max_leads": None,       # No internal cap
-        "min_leads": None,
-        "test_leads": None,      # Test mode not supported
+        "max_leads": 50000,      # Actor cap per run
+        "min_leads": 100,        # Actor rejects maxResults < 100
+        "test_leads": 100,
 
-        # Auth
-        "needs_cookies": True,
-        "cookie_exit_code": 2,
+        # Auth: actor is "[NO COOKIES]" since ~Sep 2026 (structured filters, no searchUrl)
+        "needs_cookies": False,
+        "cookie_exit_code": None,
 
         # Filter support (migrated from filter_gap_analyzer.py)
         "supported_filters": {
             "titles", "seniority", "industries", "keywords", "locations",
-            "org_locations", "company_size", "email_status", "functions",
-            "revenue", "funding"
+            "org_locations", "company_size"
         },
 
         # Location & industry behavior (for pre-flight display)
-        "location_type": "org_location",
-        "location_transform": None,        # Passes URL directly
-        "industry_taxonomy": "apollo_native",
+        "location_type": "company_country",
+        "location_transform": "title_case",
+        "industry_taxonomy": "v1",
         "industry_transform": None,
 
         # Pre-flight display
         "preflight_notes": [
-            "Passes Apollo URL directly to Apify actor",
-            "Filters by: orgLocation (company HQ)",
-            "Industries: Apollo hex IDs (no mapping needed)",
+            "Structured filters (no Apollo URL / cookies since Sep 2026)",
+            "Filters by: companyCountry (company HQ); keywords -> webKeywords (strict match)",
+            "Industries: resolved names, validated against live actor schema",
         ],
-        "preflight_warnings": [],
+        "preflight_warnings": [
+            "No email-status filter: emails are pattern guesses (email_status='guessed')",
+        ],
 
         # Orchestrator behavior
-        "timeout": 2700,  # 45 min — Olympus is slow (~26 leads/min)
+        "timeout": 2700,
 
-        # Pricing (USD per 1k leads, based on observed Apify costs)
-        "pricing": {"cost_per_1k": 1.82},
+        # Pricing (USD per 1k leads; Apify BRONZE tier 2026-09-24, +$0.01 start)
+        "pricing": {"cost_per_1k": 2.00},
 
         # Time benchmarks (observed real-world performance)
         "time_benchmark": {
-            "observed_leads": 600,
-            "observed_minutes": 23,
-            "leads_per_min": 26,
+            "observed_leads": 100,
+            "observed_minutes": 1,   # 100 leads in 4-17 s (2026-09-24); conservative
+            "leads_per_min": 300,
         },
     },
 
@@ -118,7 +119,9 @@ SCRAPER_REGISTRY = {
         ],
         "preflight_warnings": [],
 
-        "timeout": 600,
+        # 2026-09-24: 3,000 leads took >10 min (~300/min incl. startup); a 600 s
+        # timeout dropped a SUCCEEDED, fully-billed run. Allow ~1 h.
+        "timeout": 3600,
 
         # Pricing (USD per 1k leads, based on observed RapidAPI costs)
         "pricing": {"cost_per_1k": 2.00},
@@ -142,16 +145,15 @@ SCRAPER_REGISTRY = {
         "campaign_filename": "peakydev_leads.json",
 
         "max_leads": 5000,
-        "min_leads": 1000,
-        "test_leads": 1000,
+        "min_leads": 100,        # Actor minimum since 2026-09-21 (was 1000)
+        "test_leads": 100,
 
         "needs_cookies": False,
         "cookie_exit_code": None,
 
         "supported_filters": {
             "titles", "seniority", "industries", "keywords",
-            "org_locations", "locations", "company_size",
-            "email_status", "functions", "revenue", "funding"
+            "org_locations", "locations", "company_size", "revenue"
         },
 
         "location_type": "company_country",
@@ -162,15 +164,17 @@ SCRAPER_REGISTRY = {
         "preflight_notes": [
             "Filters by companyCountry (company HQ) when org_locations set",
             "Filters by personCountry (where person lives) when person locations set",
-            "Titles: lowercase via personTitle",
-            "Seniority: mapped to PeakyDev labels (Founder, CXO, Director, etc.)",
+            "Titles: personTitle; keywords -> webKeywords (strict match)",
+            "Seniority: Apollo's own lowercase values",
         ],
-        "preflight_warnings": [],
+        "preflight_warnings": [
+            "No email-status filter since 2026-09-21: enforce --require-email afterwards",
+        ],
 
         "timeout": 600,
 
-        # Pricing (USD per 1k leads, based on observed Apify costs)
-        "pricing": {"cost_per_1k": 1.76},
+        # Pricing (USD per 1k leads; Apify BRONZE tier 2026-09-24, +$0.10 start)
+        "pricing": {"cost_per_1k": 1.70},
 
         # Time benchmarks (observed real-world performance)
         "time_benchmark": {

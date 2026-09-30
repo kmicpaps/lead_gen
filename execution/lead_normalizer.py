@@ -34,7 +34,12 @@ def extract_domain_from_url(url: str) -> str:
 
 def is_junk_lead(lead: Dict[str, Any]) -> bool:
     """Check if lead is a junk/log message"""
-    name = lead.get('name', '') or lead.get('full_name', '') or lead.get('fullName', '')
+    name = (lead.get('name', '') or lead.get('full_name', '') or lead.get('fullName', '')
+            or lead.get('firstName', ''))
+    # New-format status rows carry only a message in firstName (no email, no company)
+    if lead.get('firstName') and not (lead.get('email') or lead.get('organizationName')
+                                      or lead.get('linkedinUrl')):
+        return True
     if name:
         junk_patterns = ['👀', '⏳', '📈', '🟢', 'Actor', 'Scanning pages', 'enhance scraping',
                          'check the log', 'monitor', 'Refer to the log', 'To enhance scraping']
@@ -163,7 +168,7 @@ def normalize_codecrafter(lead: Dict[str, Any]) -> Dict[str, Any]:
         'company_linkedin': lead.get('company_linkedin', ''),
         'company_phone': lead.get('company_phone', ''),
         'company_domain': lead.get('company_domain', ''),
-        'company_country': '',  # Filled by Lead Magic enrichment later
+        'company_country': lead.get('company_country') or '',  # CodeCrafter provides it
         'industry': lead.get('industry', ''),
         'source': 'codecrafter'
     }
@@ -199,19 +204,19 @@ def normalize_peakydev(lead: Dict[str, Any]) -> Dict[str, Any]:
     normalized = {
         'first_name': lead.get('firstName', ''),
         'last_name': lead.get('lastName', ''),
-        'name': lead.get('fullName', ''),
-        'title': lead.get('position', ''),
+        'name': lead.get('fullName', '') or f"{lead.get('firstName') or ''} {lead.get('lastName') or ''}".strip(),
+        'title': lead.get('position', '') or lead.get('title', '') or '',  # new schema (2026-09): 'title'
         'email': lead.get('email', ''),
         'email_status': '',  # Not available
-        'linkedin_url': lead.get('linkedinUrl', ''),  # KEY: linkedinUrl not linkedin_url
-        'city': '',  # Not available in PeakyDev
-        'country': lead.get('country', ''),
+        'linkedin_url': lead.get('linkedinUrl', '') or '',  # KEY: linkedinUrl not linkedin_url
+        'city': lead.get('city') or '',
+        'country': lead.get('country', '') or '',
         'company_name': lead.get('organizationName', ''),
         'company_website': lead.get('organizationWebsite', ''),
-        'company_linkedin': lead.get('organizationLinkedinUrl', ''),
-        'company_phone': '',  # Not available
+        'company_linkedin': lead.get('organizationLinkedinUrl', '') or '',
+        'company_phone': lead.get('organizationPhone') or '',
         'company_domain': '',
-        'company_country': '',  # Filled by Lead Magic enrichment later
+        'company_country': lead.get('organizationCountry') or '',  # new schema provides it
         'industry': lead.get('organizationIndustry', ''),
         'source': 'peakydev'
     }
@@ -290,7 +295,11 @@ def normalize_lead(lead: Dict[str, Any], source: str, fix_diacritics: bool = Tru
     if is_pre_normalized(lead):
         normalized = normalize_pre_normalized(lead, source)
     else:
-        if source == 'olympus':
+        if source == 'olympus' and ('organizationName' in lead or 'firstName' in lead):
+            # New "[NO COOKIES]" Olympus output (Sep 2026) uses PeakyDev's camelCase fields
+            normalized = normalize_peakydev(lead)
+            normalized['source'] = 'olympus'
+        elif source == 'olympus':
             normalized = normalize_olympus(lead)
         elif source == 'codecrafter':
             normalized = normalize_codecrafter(lead)
